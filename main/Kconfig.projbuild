@@ -86,10 +86,10 @@ menu "Smart Display Configuration"
             bool "Feed demo data to the UI"
             default y
             help
-                Fills weather, stocks, music and time with sample values so the UI
-                can be checked before the network/BLE services exist (step 5).
-                Media buttons and the OTA popup are simulated as well.
-                Turn this off once the real services are running.
+                Fills the music player with sample tracks and simulates the media
+                buttons and an OTA popup (30 s after boot), so the UI can be
+                checked before the BLE and OTA services exist.
+                Weather, stocks, Wi-Fi and time always use the real services.
     endmenu
 
     menu "OTA (GitHub Releases)"

@@ -1,6 +1,6 @@
 // UI 확인용 가짜 데이터 공급기 (CONFIG_APP_UI_DEMO_DATA)
-//   (시각과 Wi-Fi 는 실제 서비스(5-2)가 담당하므로 흉내 내지 않는다)
-//   - 날씨/주가/음악: 샘플 값, 주가는 5초마다 무작위 변동, 재생 시간은 1초마다 증가
+//   (시각/Wi-Fi/날씨/주가는 실제 서비스가 담당하므로 흉내 내지 않는다)
+//   - 음악: 샘플 곡, 재생 시간은 1초마다 증가
 //   - 음악 버튼: 재생/일시정지/이전/다음 동작을 흉내
 //   - 30초 후 OTA 팝업 1회, "Update" 누르면 진행률만 흉내 (재부팅 안 함)
 
@@ -13,7 +13,6 @@
 #include <time.h>
 #include "app_state.h"
 #include "esp_log.h"
-#include "esp_random.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "media_ble.h"
@@ -65,8 +64,6 @@ static void on_request(void *arg, esp_event_base_t base, int32_t id, void *data)
         app_state_set_media(&s_media);
     } else if (id == APP_EVT_REQ_OTA_START) {
         s_ota_requested = true;
-    } else if (id == APP_EVT_REQ_REFRESH) {
-        ESP_LOGI(TAG, "refresh requested");
     }
 }
 
@@ -74,24 +71,6 @@ static void demo_task(void *arg)
 {
     ble_state_t ble = BLE_STATE_CONNECTED;
     app_event_post(APP_EVT_BLE_STATE, &ble, sizeof(ble));
-
-    weather_info_t w = {
-        .valid = true, .temp_c = 22.4f, .humidity = 58, .wmo_code = 2, .is_day = false,
-        .updated_at = time(NULL),
-    };
-    app_state_set_weather(&w);
-
-    stock_list_t st = {
-        .count = 4,
-        .items = {
-            { .symbol = "AAPL", .name = "Apple", .price = 228.35, .change_pct = 1.23, .currency = "USD" },
-            { .symbol = "NVDA", .name = "NVIDIA", .price = 131.20, .change_pct = -2.05, .currency = "USD" },
-            { .symbol = "^KS11", .name = "KOSPI", .price = 2615.42, .change_pct = 0.48, .currency = "KRW" },
-            { .symbol = "005930.KS", .name = "Samsung Elec", .price = 71500, .change_pct = -0.83, .currency = "KRW" },
-        },
-        .updated_at = time(NULL),
-    };
-    app_state_set_stocks(&st);
 
     load_song(0);
     s_media.state = MEDIA_PLAYING;
@@ -105,16 +84,6 @@ static void demo_task(void *arg)
                 load_song(s_song + 1);
             }
             app_state_set_media(&s_media);
-        }
-
-        if (tick % 5 == 0) {
-            for (int i = 0; i < st.count; i++) {
-                double step = ((int)(esp_random() % 21) - 10) / 1000.0;   // ±1%
-                st.items[i].price *= 1.0 + step / 10.0;
-                st.items[i].change_pct += step * 10.0;
-            }
-            st.updated_at = time(NULL);
-            app_state_set_stocks(&st);
         }
 
         if (tick == 30) {

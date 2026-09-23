@@ -9,6 +9,7 @@
 #include "board.h"
 #include "demo_data.h"
 #include "net.h"
+#include "services.h"
 #include "ui.h"
 
 #include "esp_app_desc.h"
@@ -65,6 +66,7 @@ extern "C" void app_main(void)
     // Wi-Fi 는 SSID 가 비어 있어도 시작한다 (설정 페이지 스캔에 필요)
     ESP_ERROR_CHECK(wifi_mgr_start(settings.wifi_ssid, settings.wifi_pass));
     ESP_ERROR_CHECK(time_sync_start());
+    ESP_ERROR_CHECK(net_worker_start());   // 날씨/주가
 
     // SD 카드가 없어도 부팅은 계속한다 (전자앨범만 비활성)
     board_sdcard_mount();
@@ -75,6 +77,6 @@ extern "C" void app_main(void)
              (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
              (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
 
-    // [5-3] 날씨/주가, [5-4] 전자앨범, [5-5] BLE 음악 리모컨
+    // [5-4] 전자앨범, [5-5] BLE 음악 리모컨
     // [6단계] ota_start()   : GitHub Release 주기 확인, 부팅 성공 시 rollback 취소
 }
