@@ -36,6 +36,7 @@ typedef enum {
     APP_EVT_REQ_PHOTO_PREV,
     APP_EVT_REQ_OTA_START,       // 팝업에서 "업데이트" 선택
     APP_EVT_UI_MODE_CHANGED,     // data: ui_mode_t (app_storage.h) → 설정 저장
+    APP_EVT_SETTINGS_CHANGED,    // 설정 페이지에서 저장됨 → 서비스가 settings_load() 로 다시 읽음
 } app_event_id_t;
 
 #define APP_MAX_STOCKS 8

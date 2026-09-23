@@ -14,8 +14,9 @@ extern "C" {
 typedef enum { UI_MODE_WIDGET = 0, UI_MODE_SLIDE = 1 } ui_mode_t;
 
 // 화면 회전 (터치 좌표도 LVGL 이 함께 변환). 변경 시 재부팅 후 적용.
-//   0/180 : 800x480, 프레임버퍼 직접 렌더링 + tearing 방지 유지
-//   90/270: 480x800, 소프트웨어 회전 (부분 버퍼 → 회전 복사, 프레임 속도 저하)
+//   0      : 800x480, 프레임버퍼 2개에 직접 렌더링 + tearing 방지
+//   90/270 : 480x800, 부분 버퍼 → RGB 드라이버가 회전 복사 (프레임버퍼 1개)
+//   180    : 800x480, 90/270 과 같은 방식
 typedef enum {
     UI_ROTATION_0   = 0,
     UI_ROTATION_90  = 1,
@@ -28,12 +29,12 @@ typedef struct {
     char          wifi_pass[65];
     ui_mode_t     ui_mode;
     ui_rotation_t rotation;
-    int       photo_interval_s;
-    char      stock_symbols[128];
+    int           photo_interval_s;
+    char          stock_symbols[128];
 } app_settings_t;
 
-esp_err_t storage_init(void);                       // LittleFS 마운트
-esp_err_t settings_load(app_settings_t *out);       // NVS → Kconfig 기본값 순
+esp_err_t storage_init(void);                       // LittleFS 마운트 (실패 시 포맷)
+esp_err_t settings_load(app_settings_t *out);       // NVS 값, 없으면 Kconfig 기본값
 esp_err_t settings_save(const app_settings_t *in);
 
 #ifdef __cplusplus

@@ -19,8 +19,17 @@ typedef struct {
     esp_lcd_touch_handle_t  touch;
 } board_handles_t;
 
+typedef struct {
+    // RGB 프레임버퍼 수 (PSRAM, 각 750KB).
+    // 2: LVGL 이 직접 그리는 tearing 방지 모드 (회전 0°)
+    // 1: 부분 버퍼 + 드라이버 회전 복사 모드 (회전 90/180/270°)
+    uint8_t lcd_num_fbs;
+} board_config_t;
+
+#define BOARD_CONFIG_DEFAULT() { .lcd_num_fbs = 2 }
+
 // I2C → CH422G → GT911 리셋 시퀀스 → RGB 패널 → 터치 순으로 초기화
-esp_err_t board_init(board_handles_t *out);
+esp_err_t board_init(const board_config_t *cfg, board_handles_t *out);
 
 void      board_backlight_set(bool on);
 esp_err_t board_sdcard_mount(void);

@@ -37,6 +37,12 @@ lv_subject_t ui_subj_ble;
 
 static lv_display_t *s_disp;
 static ui_mode_t     s_mode;
+static ui_rotation_t s_rotation;
+
+ui_rotation_t ui_active_rotation(void)
+{
+    return s_rotation;
+}
 
 static void subjects_init(void)
 {
@@ -129,7 +135,26 @@ static lv_obj_t *build_screen(ui_mode_t mode)
     return mode == UI_MODE_SLIDE ? ui_slide_view_create() : ui_widget_view_create();
 }
 
-esp_err_t ui_init(const board_handles_t *hw, ui_mode_t initial_mode)
+// 회전 없음: LVGL 이 프레임버퍼 2개에 직접 그림 (tearing 방지)
+// 회전 있음: PSRAM 부분 버퍼에 그린 뒤 RGB 드라이버가 회전하며 프레임버퍼 1개로 복사
+#define ROTATED_BUF_LINES   60
+
+uint8_t ui_board_num_fbs(ui_rotation_t rotation)
+{
+    return rotation == UI_ROTATION_0 ? 2 : 1;
+}
+
+static lv_display_rotation_t to_lv_rotation(ui_rotation_t r)
+{
+    switch (r) {
+    case UI_ROTATION_90:  return LV_DISPLAY_ROTATION_90;
+    case UI_ROTATION_180: return LV_DISPLAY_ROTATION_180;
+    case UI_ROTATION_270: return LV_DISPLAY_ROTATION_270;
+    default:              return LV_DISPLAY_ROTATION_0;
+    }
+}
+
+esp_err_t ui_init(const board_handles_t *hw, ui_mode_t initial_mode, ui_rotation_t rotation)
 {
     ESP_RETURN_ON_FALSE(hw && hw->lcd_panel && hw->touch, ESP_ERR_INVALID_ARG, TAG, "hw");
 
@@ -141,9 +166,11 @@ esp_err_t ui_init(const board_handles_t *hw, ui_mode_t initial_mode)
     port_cfg.timer_period_ms = 5;
     ESP_RETURN_ON_ERROR(lvgl_port_init(&port_cfg), TAG, "lvgl port init");
 
+    s_rotation = rotation;
+    bool rotated = rotation != UI_ROTATION_0;
     const lvgl_port_display_cfg_t disp_cfg = {
         .panel_handle = hw->lcd_panel,
-        .buffer_size = BOARD_LCD_H_RES * BOARD_LCD_V_RES,
+        .buffer_size = rotated ? BOARD_LCD_H_RES * ROTATED_BUF_LINES : BOARD_LCD_H_RES * BOARD_LCD_V_RES,
         .double_buffer = true,
         .hres = BOARD_LCD_H_RES,
         .vres = BOARD_LCD_V_RES,
@@ -152,13 +179,13 @@ esp_err_t ui_init(const board_handles_t *hw, ui_mode_t initial_mode)
         .flags = {
             .buff_spiram = true,
             .swap_bytes = false,
-            .direct_mode = true,
+            .direct_mode = !rotated,
         },
     };
     const lvgl_port_display_rgb_cfg_t rgb_cfg = {
         .flags = {
             .bb_mode = true,
-            .avoid_tearing = true,
+            .avoid_tearing = !rotated,
         },
     };
     s_disp = lvgl_port_add_disp_rgb(&disp_cfg, &rgb_cfg);
@@ -171,6 +198,8 @@ esp_err_t ui_init(const board_handles_t *hw, ui_mode_t initial_mode)
     ESP_RETURN_ON_FALSE(lvgl_port_add_touch(&touch_cfg), ESP_FAIL, TAG, "add touch");
 
     ESP_RETURN_ON_FALSE(lvgl_port_lock(0), ESP_FAIL, TAG, "lock");
+    // esp_lvgl_port 가 패널 swap/mirror 를 설정하고, LVGL 이 해상도와 터치 좌표를 함께 회전한다.
+    lv_display_set_rotation(s_disp, to_lv_rotation(rotation));
     ui_theme_init(s_disp);
     subjects_init();
     ui_status_bar_create();
@@ -191,9 +220,14 @@ esp_err_t ui_init(const board_handles_t *hw, ui_mode_t initial_mode)
     vTaskDelay(pdMS_TO_TICKS(100));
     board_backlight_set(true);
 
-    ESP_LOGI(TAG, "LVGL %d.%d.%d ready, %s mode", LVGL_VERSION_MAJOR, LVGL_VERSION_MINOR,
-             LVGL_VERSION_PATCH, s_mode == UI_MODE_SLIDE ? "slide" : "widget");
+    ESP_LOGI(TAG, "LVGL %d.%d.%d ready, %s mode, rotation %d deg", LVGL_VERSION_MAJOR, LVGL_VERSION_MINOR,
+             LVGL_VERSION_PATCH, s_mode == UI_MODE_SLIDE ? "slide" : "widget", rotation * 90);
     return ESP_OK;
+}
+
+void ui_show_home(lv_screen_load_anim_t anim)
+{
+    lv_screen_load_anim(build_screen(s_mode), anim, 250, 0, true);
 }
 
 void ui_set_mode(ui_mode_t mode)
@@ -201,10 +235,14 @@ void ui_set_mode(ui_mode_t mode)
     if (!lvgl_port_lock(0)) {   // 재귀 mutex: LVGL 이벤트 콜백 안에서 호출해도 안전
         return;
     }
-    if (mode != s_mode) {
-        s_mode = mode;
-        lv_screen_load_anim(build_screen(mode), LV_SCREEN_LOAD_ANIM_FADE_IN, 250, 0, true);
+    bool changed = mode != s_mode;
+    s_mode = mode;
+    // 설정 화면에서 누른 경우에는 모드가 같아도 홈 화면으로 돌아간다
+    if (changed || ui_settings_is_open()) {
+        ui_show_home(LV_SCREEN_LOAD_ANIM_FADE_IN);
         ui_status_bar_set_mode(mode);
+    }
+    if (changed) {
         app_event_post(APP_EVT_UI_MODE_CHANGED, &mode, sizeof(mode));
     }
     lvgl_port_unlock();

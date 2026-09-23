@@ -5,6 +5,7 @@
 #include <time.h>
 
 #include "app_state.h"
+#include "app_storage.h"
 #include "board.h"
 #include "demo_data.h"
 #include "ui.h"
@@ -27,6 +28,16 @@ static void init_nvs()
     ESP_ERROR_CHECK(err);
 }
 
+// 상태 표시줄에서 위젯형/슬라이드형을 바꾸면 다음 부팅에도 유지되도록 저장
+static void on_ui_mode_changed(void *arg, esp_event_base_t base, int32_t id, void *data)
+{
+    app_settings_t s;
+    if (settings_load(&s) == ESP_OK) {
+        s.ui_mode = *static_cast<const ui_mode_t *>(data);
+        settings_save(&s);
+    }
+}
+
 extern "C" void app_main(void)
 {
     ESP_LOGI(TAG, "Smart Display v%s", esp_app_get_description()->version);
@@ -36,10 +47,19 @@ extern "C" void app_main(void)
     tzset();
     ESP_ERROR_CHECK(app_state_init());
 
+    if (storage_init() != ESP_OK) {
+        ESP_LOGW(TAG, "LittleFS unavailable (fonts/icons disabled)");
+    }
+    app_settings_t settings;
+    ESP_ERROR_CHECK(settings_load(&settings));
+
     static board_handles_t hw;
-    ESP_ERROR_CHECK(board_init(&hw));
-    // [5단계] NVS 설정의 UI 모드/회전 적용
-    ESP_ERROR_CHECK(ui_init(&hw, UI_MODE_WIDGET));
+    board_config_t board_cfg = BOARD_CONFIG_DEFAULT();
+    board_cfg.lcd_num_fbs = ui_board_num_fbs(settings.rotation);
+    ESP_ERROR_CHECK(board_init(&board_cfg, &hw));
+    ESP_ERROR_CHECK(ui_init(&hw, settings.ui_mode, settings.rotation));
+
+    ESP_ERROR_CHECK(esp_event_handler_register(APP_EVENT, APP_EVT_UI_MODE_CHANGED, on_ui_mode_changed, NULL));
 
     // SD 카드가 없어도 부팅은 계속한다 (전자앨범만 비활성)
     board_sdcard_mount();
@@ -50,6 +70,6 @@ extern "C" void app_main(void)
              (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
              (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
 
-    // [5단계] storage / net / services / media_ble / photo 태스크 시작
+    // [5-2] Wi-Fi + NTP, [5-3] 날씨/주가, [5-4] 전자앨범, [5-5] BLE 음악 리모컨
     // [6단계] ota_start()   : GitHub Release 주기 확인, 부팅 성공 시 rollback 취소
 }

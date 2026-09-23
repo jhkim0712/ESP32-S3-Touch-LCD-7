@@ -57,6 +57,10 @@ void ui_photo_create(lv_obj_t *parent);
 // ---- 화면 / 오버레이 ----
 lv_obj_t *ui_widget_view_create(void);
 lv_obj_t *ui_slide_view_create(void);
+void      ui_show_home(lv_screen_load_anim_t anim);    // 현재 모드 화면을 새로 만들어 표시
+void      ui_settings_open(void);
+bool      ui_settings_is_open(void);
+ui_rotation_t ui_active_rotation(void);                 // 이번 부팅에 적용된 회전
 void      ui_status_bar_create(void);
 void      ui_status_bar_set_mode(ui_mode_t mode);
 void      ui_ota_popup_show(const ota_release_t *rel);

@@ -1,5 +1,5 @@
 // 상태 표시줄: lv_layer_top 에 두어 화면(모드)이 바뀌어도 유지된다.
-//   [Wi-Fi] [BT]        요일 날짜 시각        [모드 전환]
+//   [Wi-Fi] [BT]        요일 날짜 시각        [모드 전환] [설정]
 
 #include "ui.h"
 #include "ui_internal.h"
@@ -44,6 +44,21 @@ static void on_mode_click(lv_event_t *e)
     ui_set_mode(ui_get_mode() == UI_MODE_WIDGET ? UI_MODE_SLIDE : UI_MODE_WIDGET);
 }
 
+static void on_settings_click(lv_event_t *e)
+{
+    ui_settings_open();
+}
+
+static lv_obj_t *bar_button(lv_obj_t *bar, lv_event_cb_t cb)
+{
+    lv_obj_t *btn = lv_button_create(bar);
+    lv_obj_set_height(btn, UI_STATUS_BAR_H - 10);
+    lv_obj_set_style_bg_color(btn, UI_COLOR_CARD_ALT, 0);
+    lv_obj_set_style_shadow_width(btn, 0, 0);
+    lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, NULL);
+    return btn;
+}
+
 void ui_status_bar_create(void)
 {
     lv_obj_t *bar = lv_obj_create(lv_layer_top());
@@ -68,13 +83,12 @@ void ui_status_bar_create(void)
     lv_obj_set_style_text_align(clock, LV_TEXT_ALIGN_CENTER, 0);
     lv_subject_add_observer_obj(&ui_subj_time, time_cb, clock, NULL);
 
-    lv_obj_t *btn = lv_button_create(bar);
-    lv_obj_set_height(btn, UI_STATUS_BAR_H - 10);
-    lv_obj_set_style_bg_color(btn, UI_COLOR_CARD_ALT, 0);
-    lv_obj_set_style_shadow_width(btn, 0, 0);
-    lv_obj_add_event_cb(btn, on_mode_click, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *btn = bar_button(bar, on_mode_click);
     s_mode_label = ui_label(btn, UI_FONT_S, UI_COLOR_TEXT, "");
     lv_obj_center(s_mode_label);
+
+    lv_obj_t *gear = bar_button(bar, on_settings_click);
+    lv_obj_center(ui_label(gear, UI_FONT_M, UI_COLOR_TEXT, LV_SYMBOL_SETTINGS));
 }
 
 void ui_status_bar_set_mode(ui_mode_t mode)

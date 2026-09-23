@@ -7,9 +7,9 @@
 
 static const char *TAG = "board";
 
-esp_err_t board_init(board_handles_t *out)
+esp_err_t board_init(const board_config_t *cfg, board_handles_t *out)
 {
-    ESP_RETURN_ON_FALSE(out, ESP_ERR_INVALID_ARG, TAG, "out is NULL");
+    ESP_RETURN_ON_FALSE(cfg && out, ESP_ERR_INVALID_ARG, TAG, "cfg/out is NULL");
 
     // 1) I2C 버스 (GT911 + CH422G 공유, 보드에 4.7K 외부 풀업 있음)
     const i2c_master_bus_config_t bus_cfg = {
@@ -28,7 +28,7 @@ esp_err_t board_init(board_handles_t *out)
     ESP_RETURN_ON_ERROR(board_touch_reset(), TAG, "touch reset");
 
     // 4) RGB LCD
-    ESP_RETURN_ON_ERROR(board_lcd_init(&out->lcd_panel), TAG, "lcd");
+    ESP_RETURN_ON_ERROR(board_lcd_init(cfg->lcd_num_fbs, &out->lcd_panel), TAG, "lcd");
 
     // 5) 터치 드라이버
     ESP_RETURN_ON_ERROR(board_touch_init(out->i2c_bus, &out->touch), TAG, "touch");
