@@ -43,18 +43,19 @@ ESP32-S3-Touch-LCD-7/
 │   ├── ota/          [OTA]      github_ota.c  Releases API, semver, esp_https_ota, rollback
 │   │
 │   └── ui/           [UI]
-│       ├── ui_core.cpp          esp_lvgl_port 초기화, 이벤트 → UI 디스패치
-│       ├── ui_theme.cpp         색상, 폰트(Montserrat + Tiny TTF 한글)
-│       ├── status_bar.cpp       Wi-Fi/BLE/시간, 모드 전환 버튼
-│       ├── widget_view.cpp      2x2 카드 그리드
-│       ├── slide_view.cpp       lv_tileview 가로 스와이프
+│       ├── ui_core.c            esp_lvgl_port 초기화, APP_EVENT → lv_subject 갱신, 모드 전환
+│       ├── ui_theme.c           색상, 카드 스타일, 숫자 포맷
+│       ├── status_bar.c         Wi-Fi/BLE/날짜·시각, 모드 전환 버튼 (lv_layer_top)
+│       ├── widget_view.c        카드 그리드 (가로 2x2 / 세로 1x4)
+│       ├── slide_view.c         lv_tileview 가로 스와이프 + 화살표 + 페이지 점
+│       ├── popup_ota.c          업데이트 알림 → 진행률 → 결과
 │       └── pages/
-│           ├── page_clock.cpp          아날로그(lv_scale) + 디지털
-│           ├── page_photo.cpp
-│           ├── page_weather_stock.cpp
-│           ├── page_music.cpp
-│           ├── page_settings.cpp       Wi-Fi 스캔·키보드, 모드, 간격
-│           └── popup_ota.cpp
+│           ├── page_clock.c            아날로그(lv_scale) + 디지털
+│           ├── page_photo.c            PSRAM RGB565 프레임 표시, 좌/우 탭으로 이전/다음
+│           ├── page_weather.c
+│           ├── page_stocks.c
+│           ├── page_music.c
+│           └── page_settings.c         (5단계) Wi-Fi 스캔·키보드, 회전, 간격
 │
 ├── assets/                     # → LittleFS 이미지로 굽기 (littlefs_create_partition_image)
 │   ├── fonts/NotoSansKR-subset.ttf
@@ -118,10 +119,12 @@ ESP32-S3-Touch-LCD-7/
 ```
 net_worker(core0) ─ http_get_alloc(open-meteo) ─ cJSON 파싱 ─ app_state_set_weather()
       └─ esp_event_post(APP_EVENT, APP_EVT_WEATHER_UPDATED)
-            └─ ui_core 핸들러 → lvgl_port_lock() → widget/slide 두 뷰의 날씨 라벨 갱신
+            └─ ui_core 핸들러 → lv_async_call (LVGL 태스크로 이동) → lv_subject 갱신
+                  └─ 화면에 있는 날씨 위젯의 observer 가 app_state_get_weather() 로 다시 그림
 ```
 
-위젯형과 슬라이드형 뷰는 같은 `app_state` 를 구독하므로, 모드를 바꿔도 데이터를 다시 요청하지 않습니다.
+- 위젯은 생성될 때 subject 에 observer 를 등록하고, 삭제되면 자동으로 해제됩니다. 그래서 위젯형과 슬라이드형 화면을 바꿔 만들어도 등록/해제 코드가 따로 필요 없고, 데이터도 다시 요청하지 않습니다.
+- 반대로 UI 버튼(음악 제어, 새로고침, 사진 이전/다음, OTA 시작)은 `APP_EVT_REQ_*` 이벤트만 보냅니다. UI는 서비스 구현을 직접 호출하지 않습니다.
 
 ## 2.6 화면 회전 (5단계, NVS 설정)
 

@@ -1,6 +1,7 @@
 // 서비스(생산자) ↔ UI(소비자) 사이의 공유 데이터 모델과 이벤트.
-// 서비스 태스크는 app_state_update_*() 로 값을 쓰고 이벤트를 발행하며,
-// UI 는 이벤트를 받아 LVGL lock 안에서 스냅샷을 읽어 화면을 갱신한다.
+// 서비스 태스크는 app_state_set_*() 로 값을 쓰면 해당 *_UPDATED 이벤트가 자동 발행되고,
+// UI 는 이벤트를 받아 LVGL lock 안에서 app_state_get_*() 스냅샷으로 화면을 갱신한다.
+// 반대 방향(UI → 서비스) 요청도 이벤트로 보내 UI 가 서비스 구현에 의존하지 않게 한다.
 #pragma once
 
 #include <stdbool.h>
@@ -15,17 +16,26 @@ extern "C" {
 ESP_EVENT_DECLARE_BASE(APP_EVENT);
 
 typedef enum {
+    // 서비스 → UI
     APP_EVT_WIFI_CONNECTED,
     APP_EVT_WIFI_DISCONNECTED,
     APP_EVT_TIME_SYNCED,
     APP_EVT_WEATHER_UPDATED,
     APP_EVT_STOCKS_UPDATED,
     APP_EVT_MEDIA_UPDATED,       // 곡 정보/재생 상태 변경
-    APP_EVT_BLE_STATE,           // 연결/페어링 상태
-    APP_EVT_PHOTO_READY,         // 다음 사진 디코딩 완료
-    APP_EVT_OTA_AVAILABLE,       // 새 버전 발견 → 팝업
-    APP_EVT_OTA_PROGRESS,
-    APP_EVT_OTA_DONE,
+    APP_EVT_BLE_STATE,           // data: ble_state_t (media_ble.h)
+    APP_EVT_PHOTO_READY,         // data: const photo_frame_t * (photo.h)
+    APP_EVT_OTA_AVAILABLE,       // data: ota_release_t (ota.h) → 팝업
+    APP_EVT_OTA_PROGRESS,        // data: int 0..100
+    APP_EVT_OTA_DONE,            // data: esp_err_t
+
+    // UI → 서비스
+    APP_EVT_REQ_REFRESH,         // 날씨/주가 즉시 갱신
+    APP_EVT_REQ_MEDIA_CMD,       // data: media_cmd_t (media_ble.h)
+    APP_EVT_REQ_PHOTO_NEXT,
+    APP_EVT_REQ_PHOTO_PREV,
+    APP_EVT_REQ_OTA_START,       // 팝업에서 "업데이트" 선택
+    APP_EVT_UI_MODE_CHANGED,     // data: ui_mode_t (app_storage.h) → 설정 저장
 } app_event_id_t;
 
 #define APP_MAX_STOCKS 8
@@ -64,7 +74,10 @@ typedef struct {
     uint32_t           elapsed_s;
 } media_info_t;
 
-esp_err_t app_state_init(void);
+esp_err_t app_state_init(void);   // 기본 이벤트 루프 생성 포함
+
+// 이벤트 발행 헬퍼 (data 는 복사됨, 대기하지 않음)
+esp_err_t app_event_post(app_event_id_t id, const void *data, size_t size);
 
 void app_state_set_weather(const weather_info_t *w);
 void app_state_get_weather(weather_info_t *out);
