@@ -13,10 +13,21 @@ extern "C" {
 
 typedef enum { UI_MODE_WIDGET = 0, UI_MODE_SLIDE = 1 } ui_mode_t;
 
+// 화면 회전 (터치 좌표도 LVGL 이 함께 변환). 변경 시 재부팅 후 적용.
+//   0/180 : 800x480, 프레임버퍼 직접 렌더링 + tearing 방지 유지
+//   90/270: 480x800, 소프트웨어 회전 (부분 버퍼 → 회전 복사, 프레임 속도 저하)
+typedef enum {
+    UI_ROTATION_0   = 0,
+    UI_ROTATION_90  = 1,
+    UI_ROTATION_180 = 2,
+    UI_ROTATION_270 = 3,
+} ui_rotation_t;
+
 typedef struct {
-    char      wifi_ssid[33];
-    char      wifi_pass[65];
-    ui_mode_t ui_mode;
+    char          wifi_ssid[33];
+    char          wifi_pass[65];
+    ui_mode_t     ui_mode;
+    ui_rotation_t rotation;
     int       photo_interval_s;
     char      stock_symbols[128];
 } app_settings_t;

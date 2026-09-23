@@ -123,11 +123,23 @@ net_worker(core0) ─ http_get_alloc(open-meteo) ─ cJSON 파싱 ─ app_state_
 
 위젯형과 슬라이드형 뷰는 같은 `app_state` 를 구독하므로, 모드를 바꿔도 데이터를 다시 요청하지 않습니다.
 
-## 2.6 단계별 구현 로드맵
+## 2.6 화면 회전 (5단계, NVS 설정)
+
+설정 페이지에서 0° / 90° / 180° / 270°를 선택하면 NVS에 저장하고, **재부팅할 때 적용**합니다. 렌더링 버퍼 구성이 달라서 실행 중에는 바꾸지 않습니다.
+
+| 회전 | 해상도 | 렌더링 방식 |
+|---|---|---|
+| 0°, 180° | 800x480 | 지금과 같음: PSRAM 프레임버퍼 2개에 직접 그리기 + 찢어짐 방지. 180°는 LVGL 회전 사용 |
+| 90°, 270° | 480x800 | RGB 패널에 하드웨어 회전이 없음 → LVGL 부분 버퍼 + 소프트웨어 회전 후 프레임버퍼에 복사. 찢어짐 방지 미적용, 프레임 속도 저하 |
+
+- **터치:** `lv_display_set_rotation()`을 쓰면 LVGL이 터치 좌표도 함께 변환하므로 GT911 설정은 그대로 둡니다.
+- **UI 레이아웃(4단계):** 좌표를 고정하지 않고 flex/grid로 만들어 가로와 세로 모두에서 동작하게 합니다.
+
+## 2.7 단계별 구현 로드맵
 
 | 단계 | 산출물 |
 |---|---|
 | 3 | `board/*` 구현, `ui_core` LVGL 바인딩 (PSRAM 프레임버퍼 + bounce buffer + GT911) |
 | 4 | 테마, `widget_view`, `slide_view`, 모드 전환, 각 페이지 레이아웃 |
-| 5 | `app_core`, `storage`, `net`, `services`, `media_ble`, `photo` + FreeRTOS 태스크 |
+| 5 | `app_core`, `storage`(NVS 설정: Wi-Fi, UI 모드, **화면 회전**, 간격, 종목), `net`, `services`, `media_ble`, `photo` + FreeRTOS 태스크 |
 | 6 | `ota` + GitHub Actions 릴리스 워크플로 |

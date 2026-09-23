@@ -57,29 +57,28 @@
 ### CH422G 출력 비트
 | EXIO | 기능 | 부팅 값 |
 |---|---|---|
-| 1 | TP_RST (GT911 리셋) | LOW → HIGH |
-| 2 | LCD 백라이트 | HIGH (ON/OFF만 가능, PWM 밝기 조절 불가) |
+| 1 | CTP_RST (GT911 리셋) | LOW → HIGH |
+| 2 | DISP (백라이트 부스트 EN) | LOW → 첫 화면을 그린 뒤 HIGH (ON/OFF만 가능, 밝기 조절 불가) |
 | 3 | LCD_RST | HIGH |
-| 4 | SD_CS | LOW (상시 선택) |
-| 5 | USB_SEL | HIGH (Waveshare 기본값) |
+| 4 | SDCS | LOW (상시 선택) |
+| 5 | USB_SEL (GPIO19/20을 USB 또는 CAN으로 전환) | HIGH (Waveshare 기본값) |
+| 6 | LCD_VDD_EN (패널 전원 승압 EN) | HIGH (회로도 V1.2에서 확인) |
 
-### GT911 리셋 시퀀스 (주소 0x5D 고정)
+### 초기화 순서 (`components/board/board.c`)
 ```
 CH422G[0x24] ← 0x01          // IO0~7 출력 모드
-CH422G[0x38] ← 0x2C          // BL on, LCD_RST high, USB_SEL high, TP_RST low
-delay 100ms
-GPIO4 ← LOW (output)         // INT low → 주소 0x5D
-delay 100ms
-CH422G[0x38] ← 0x2E          // TP_RST high
-delay 200ms
-GPIO4 → input                // 이후 터치 INT 입력으로 사용
+CH422G[0x38] ← 0x68          // LCD_VDD_EN, USB_SEL, LCD_RST high / TP_RST low / 백라이트 OFF
+TP_RST low, GPIO4 ← LOW      // INT low 상태에서 리셋 해제 → GT911 주소 0x5D
+TP_RST high, 60ms 대기
+GPIO4 → input, 50ms 대기
+RGB 패널 생성 → GT911 드라이버 → LVGL → 첫 화면 → 백라이트 ON
 ```
 
 ### microSD (SPI2)
 MOSI 11, SCLK 12, MISO 13, CS = CH422G EXIO4 (상시 LOW) → `sdspi` 설정에서 `gpio_cs = GPIO_NUM_NC`
 
 ### 사용하면 안 되는 핀
-GPIO19/20 (USB), GPIO43/44 (UART0/RS485). GPIO0/45/46 은 LCD 데이터로 쓰이는 스트래핑 핀입니다.
+GPIO19/20 (USB 또는 CAN), GPIO43/44 (UART0 콘솔), GPIO15/16 (RS485). GPIO0/45/46 은 LCD 데이터로 쓰이는 스트래핑 핀입니다. 남는 핀은 Sensor AD 헤더의 GPIO6 정도입니다.
 
 ---
 

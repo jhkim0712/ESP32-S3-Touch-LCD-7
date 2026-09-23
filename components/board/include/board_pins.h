@@ -63,14 +63,20 @@
 #define CH422G_ADDR_WR_IO           0x38   // EXIO0~7 출력 값
 #define CH422G_ADDR_RD_IO           0x26   // EXIO0~7 입력 값
 
-#define BOARD_EXIO_TP_RST           (1u << 1)  // GT911 reset (active low)
-#define BOARD_EXIO_LCD_BL           (1u << 2)  // 백라이트 ON/OFF (PWM 불가)
-#define BOARD_EXIO_LCD_RST          (1u << 3)  // LCD reset (active low)
-#define BOARD_EXIO_SD_CS            (1u << 4)  // SD 카드 CS (active low, 상시 LOW 유지)
-#define BOARD_EXIO_USB_SEL          (1u << 5)  // USB/CAN 선택 (Waveshare 기본값 HIGH 유지)
+// 회로도 V1.2 기준 (CH422G IOn = EXIOn)
+#define BOARD_EXIO_TP_RST           (1u << 1)  // CTP_RST: GT911 reset (active low)
+#define BOARD_EXIO_LCD_BL           (1u << 2)  // DISP: 백라이트 부스트(AP3032) EN, ON/OFF 만 가능
+#define BOARD_EXIO_LCD_RST          (1u << 3)  // LCD_RST (active low)
+#define BOARD_EXIO_SD_CS            (1u << 4)  // SDCS (active low, 상시 LOW 유지)
+#define BOARD_EXIO_USB_SEL          (1u << 5)  // USB_SEL: GPIO19/20 을 USB 또는 CAN 으로 전환 (Waveshare 기본값 HIGH)
+#define BOARD_EXIO_LCD_VDD_EN       (1u << 6)  // LCD_VDD_EN: 패널 전원 승압(AP3012) enable
 
-// 부팅 시 초기값: BL on, LCD_RST high, USB_SEL high, TP_RST low(리셋 중), SD_CS low
-#define BOARD_EXIO_BOOT_STATE       (BOARD_EXIO_LCD_BL | BOARD_EXIO_LCD_RST | BOARD_EXIO_USB_SEL)
+// 부팅 직후 값: 패널 전원 ON, LCD_RST high, USB_SEL high,
+// TP_RST low(GT911 리셋 중), SD_CS low, 백라이트 OFF (첫 화면을 그린 뒤 켠다)
+#define BOARD_EXIO_BOOT_STATE       (BOARD_EXIO_LCD_VDD_EN | BOARD_EXIO_LCD_RST | BOARD_EXIO_USB_SEL)
+
+// RGB 패널 DMA 가 PSRAM 대신 읽는 내부 RAM bounce buffer 높이(줄). 800 x 10 x 2B x 2개 = 32KB
+#define BOARD_LCD_BOUNCE_LINES      10
 
 // ---------------------------------------------------------------------------
 // micro SD (SPI2, CS 는 CH422G 로 상시 선택 → sdspi 에는 CS 미지정)
@@ -82,5 +88,7 @@
 #define BOARD_SD_MOUNT_POINT        "/sdcard"
 
 // ---------------------------------------------------------------------------
-// 기타: GPIO19/20 = USB D-/D+, GPIO43/44 = UART0(RS485 공유) → 사용 금지
+// 기타 (사용 금지): GPIO19/20 = USB D-/D+ 또는 CAN (USB_SEL 로 전환),
+//   GPIO43/44 = UART0 콘솔 (CH343 / UART2 헤더), GPIO15/16 = RS485 TX/RX
+// 여유 핀: GPIO6 (Sensor AD 헤더)
 // ---------------------------------------------------------------------------
