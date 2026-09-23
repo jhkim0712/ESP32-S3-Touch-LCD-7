@@ -1,5 +1,5 @@
 // 설정 페이지 (상태 표시줄의 톱니바퀴 버튼)
-//   Wi-Fi SSID(직접 입력 또는 [Scan] 목록에서 선택)/비밀번호, 연결 상태,
+//   Wi-Fi SSID(직접 입력 또는 [Scan] 목록에서 선택)/비밀번호, 연결 상태, BLE 페어링 상태/해제,
 //   화면 회전, 사진 전환 간격, 주식 종목, 기기 정보
 // [Save] → NVS 저장 + APP_EVT_SETTINGS_CHANGED (Wi-Fi 는 새 설정으로 재연결).
 // 회전이 바뀌었으면 재부팅을 묻는다.
@@ -14,6 +14,8 @@
 #include "esp_app_desc.h"
 #include "esp_heap_caps.h"
 #include "esp_system.h"
+#include "media_ble.h"
+#include "sdkconfig.h"
 
 typedef struct {
     lv_obj_t *ssid;
@@ -268,6 +270,33 @@ static void wifi_status_cb(lv_observer_t *o, lv_subject_t *subj)
     }
 }
 
+static void __attribute__((unused)) ble_status_cb(lv_observer_t *o, lv_subject_t *subj)
+{
+    lv_obj_t *label = lv_observer_get_target_obj(o);
+    switch (lv_subject_get_int(subj)) {
+    case BLE_STATE_BONDED:
+    case BLE_STATE_CONNECTED:
+        lv_label_set_text(label, LV_SYMBOL_OK "  Phone connected");
+        lv_obj_set_style_text_color(label, UI_COLOR_ACCENT, 0);
+        break;
+    case BLE_STATE_ADVERTISING:
+        lv_label_set_text(label, "Waiting for a phone - pair \"Smart Display\" in the phone's Bluetooth settings");
+        lv_obj_set_style_text_color(label, UI_COLOR_WARM, 0);
+        break;
+    default:
+        lv_label_set_text(label, "Bluetooth off");
+        lv_obj_set_style_text_color(label, UI_COLOR_DIM, 0);
+        break;
+    }
+}
+
+static void __attribute__((unused)) on_unpair(lv_event_t *e)
+{
+    app_event_post(APP_EVT_REQ_BLE_UNPAIR, NULL, 0);
+    settings_view_t *v = lv_event_get_user_data(e);
+    lv_label_set_text(v->status, LV_SYMBOL_OK "  Pairing removed");
+}
+
 // ---- 동작 ----
 
 static void on_back(lv_event_t *e)
@@ -383,6 +412,18 @@ void ui_settings_open(void)
     v->pass = text_field(row(card, "Password"), v, s.wifi_pass, sizeof(s.wifi_pass) - 1, true);
     v->wifi_status = hint(card, "");
     lv_subject_add_observer_obj(&ui_subj_wifi, wifi_status_cb, v->wifi_status, NULL);
+
+#if CONFIG_APP_BLE_MEDIA
+    card = section(body, LV_SYMBOL_BLUETOOTH, "Bluetooth (music remote)");
+    lv_obj_t *ble_status = hint(card, "");
+    lv_subject_add_observer_obj(&ui_subj_ble, ble_status_cb, ble_status, NULL);
+    lv_obj_t *unpair = lv_button_create(card);
+    lv_obj_set_style_bg_color(unpair, UI_COLOR_CARD_ALT, 0);
+    lv_obj_add_event_cb(unpair, on_unpair, LV_EVENT_CLICKED, v);
+    lv_obj_center(ui_label(unpair, UI_FONT_M, UI_COLOR_TEXT, LV_SYMBOL_CLOSE "  Forget paired phones"));
+    hint(card, "iPhone: track info + control (AMS). Android: play/pause/next/previous/volume keys only.");
+
+#endif
 
     card = section(body, LV_SYMBOL_IMAGE, "Display");
     v->rotation = dropdown(row(card, "Rotation"), k_rotation_opts, s.rotation);

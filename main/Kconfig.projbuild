@@ -71,6 +71,20 @@ menu "Smart Display Configuration"
             default 60
     endmenu
 
+    menu "Music remote (BLE)"
+        config APP_BLE_MEDIA
+            bool "Enable BLE music remote (iOS AMS / Android media keys)"
+            depends on BT_NIMBLE_ENABLED
+            default n
+            help
+                Disabled by default because Bluetooth needs a lot of internal RAM
+                next to the RGB LCD bounce buffers, Wi-Fi and TLS.
+                To enable: set CONFIG_BT_ENABLED=y, CONFIG_BT_NIMBLE_ENABLED=y and
+                the NimBLE options listed (commented) in sdkconfig.defaults, then
+                enable this option. When disabled, the music card/page, the
+                Bluetooth settings section and the status bar BT icon are hidden.
+    endmenu
+
     menu "Photo Frame"
         config APP_PHOTO_DIR
             string "Photo directory on SD card"
@@ -86,10 +100,9 @@ menu "Smart Display Configuration"
             bool "Feed demo data to the UI"
             default y
             help
-                Fills the music player with sample tracks and simulates the media
-                buttons and an OTA popup (30 s after boot), so the UI can be
-                checked before the BLE and OTA services exist.
-                Weather, stocks, Wi-Fi and time always use the real services.
+                Shows a simulated OTA update popup 30 s after boot so the popup
+                can be checked before the OTA service exists (step 6).
+                Everything else always uses the real services.
     endmenu
 
     menu "OTA (GitHub Releases)"

@@ -148,7 +148,34 @@ net_worker(core0) ─ http_get_alloc(open-meteo) ─ cJSON 파싱 ─ app_state_
   바꾸면 현재 화면을 다시 만들어 바로 적용합니다(재부팅 불필요). 날짜 형식("9월 23일 (수)"), 날씨 상태 문구도 함께 바뀝니다.
 - **날씨 아이콘:** 상태별 색 원 대신 PNG 아이콘을 LittleFS 에 넣어 표시합니다.
 
-## 2.8 단계별 구현 로드맵
+## 2.8 웹 UI, 사진 업로드, RSS 이미지 동기화 (5-7 ~ 5-9)
+
+같은 공유기에 연결된 PC/휴대폰 브라우저에서 `http://smart-display.local` (mDNS) 또는 IP 로 접속합니다.
+
+**웹 서버 (5-7)**
+- `esp_http_server` (HTTP, 같은 네트워크 전용) + `espressif/mdns`. 서버 태스크는 core 0, 내부 RAM 사용을 줄이기 위해 동시 연결 수를 작게 둡니다.
+- 페이지(HTML/JS/CSS)는 gzip 으로 압축해 LittleFS 에 넣고, 설정은 JSON REST API 로 주고받습니다
+  (`GET/POST /api/settings`, `POST /api/wifi/scan`, `GET /api/status`). 저장하면 기기 화면과 같은 `APP_EVT_SETTINGS_CHANGED` 흐름을 탑니다.
+- 접근 보호: 기기 화면에 표시되는 PIN 을 처음 접속할 때 입력 (같은 네트워크의 다른 사람이 설정을 바꾸지 못하도록).
+
+**사진 업로드 + 자르기 (5-8)**
+- 여러 파일을 한 번에 선택하면 브라우저가 한 장씩 자르기 화면을 보여 주고(비율: 화면 가로/세로/자유),
+  **자르기와 크기 조정, JPEG 인코딩을 브라우저에서 처리**한 뒤 작은 baseline JPEG 로 올립니다.
+  → 기기에서 못 푸는 progressive JPEG, 큰 PNG, 아이폰 HEIC(사파리에서 열 때) 문제가 업로드 단계에서 해결되고, SD 에서 읽는 시간도 짧아집니다.
+- 업로드는 한 파일씩 순서대로 `POST /api/photos?album=...` 로 SD 에 바로 기록 (임시 파일 → 완료 후 이름 변경).
+- 앨범(폴더) 목록, 사진 썸네일 보기, 삭제 기능 포함. 업로드가 끝나면 전자앨범 목록을 다시 읽습니다.
+
+**RSS 이미지 피드 동기화 (5-9)**
+- 웹 UI(또는 기기 설정)에서 피드 URL 을 등록하면 주기적으로(기본 1시간) 받아와 새 이미지를
+  `/sdcard/photos/rss/<피드 이름>/` 에 저장합니다. 피드별 최대 보관 장수를 넘으면 오래된 것부터 지웁니다.
+- 이미지 URL 추출: `<enclosure type="image/*">`, `<media:content>`, `<media:thumbnail>`, 본문의 `<img src>` (RSS 2.0 / Atom).
+- 피드 XML 은 클 수 있어서 전체를 메모리에 올리지 않고 스트리밍으로 태그만 찾습니다. 받은 URL 목록은 인덱스 파일에 남겨 중복 다운로드를 막습니다.
+- HTTPS 요청은 기존 `net_worker` 에서 날씨/주가와 순서대로 처리합니다 (TLS 세션 동시 1개 유지).
+- **제약:** 웹에서 받은 이미지는 progressive JPEG 인 경우가 많은데 기기 디코더가 풀지 못합니다.
+  받은 뒤 헤더를 검사해 표시할 수 없는 파일은 건너뛰고 웹 UI 에 개수를 보여 줍니다.
+  (피드가 여러 크기의 이미지를 제공하면 작은 것을 우선 선택)
+
+## 2.9 단계별 구현 로드맵
 
 | 단계 | 산출물 |
 |---|---|
@@ -158,6 +185,9 @@ net_worker(core0) ─ http_get_alloc(open-meteo) ─ cJSON 파싱 ─ app_state_
 | 5-2 | `net`: Wi-Fi 연결/스캔, SNTP |
 | 5-3 | `services`: 날씨, 주가 (`net_worker` 에서 HTTPS 직렬 처리) |
 | 5-4 | `photo`: 전자앨범 (ROM TJpgDec 스트리밍 디코딩, PNG, EXIF 방향) |
-| 5-5 | `media_ble`: BLE 음악 리모컨 (iOS AMS / Android HID 미디어 키) |
-| 5-6 | 한글 폰트 + 언어 설정 + 날씨 아이콘 (아래 2.7 참고) |
-| 6 | `ota` + GitHub Actions 릴리스 워크플로 |
+| 5-5 | `media_ble`: BLE 음악 리모컨 (iOS AMS / Android HID 미디어 키). 내부 RAM 부족으로 기본 비활성(`CONFIG_APP_BLE_MEDIA=n`, `CONFIG_BT_ENABLED=n`) - 코드는 유지, 끄면 음악 카드/페이지·BT 아이콘·설정 항목이 숨겨짐 |
+| 5-6 | 한글 폰트 + 언어 설정 + 날씨 아이콘 (위 2.7 참고) |
+| 5-7 | 웹 UI: 브라우저에서 설정 (아래 2.8 참고) |
+| 5-8 | 웹 UI: 사진 업로드 (여러 장 동시) + 브라우저에서 자르기(crop) |
+| 5-9 | RSS 이미지 피드 동기화 → SD 카드 저장 |
+| 6 | `ota` + GitHub Actions 릴리스 워크플로 (웹 UI 에서도 업데이트 확인/실행) |

@@ -34,6 +34,7 @@ typedef enum {
     APP_EVT_REQ_REFRESH,         // 날씨/주가 즉시 갱신
     APP_EVT_REQ_WIFI_SCAN,       // 설정 페이지의 Wi-Fi 스캔
     APP_EVT_REQ_MEDIA_CMD,       // data: media_cmd_t (media_ble.h)
+    APP_EVT_REQ_BLE_UNPAIR,      // 저장된 BLE 페어링 모두 삭제
     APP_EVT_REQ_PHOTO_NEXT,
     APP_EVT_REQ_PHOTO_PREV,
     APP_EVT_REQ_OTA_START,       // 팝업에서 "업데이트" 선택

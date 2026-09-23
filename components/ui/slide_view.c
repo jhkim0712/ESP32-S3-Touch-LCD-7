@@ -1,10 +1,11 @@
 // 슬라이드형 화면: lv_tileview 가로 스와이프
-//   시계 → 전자앨범 → 날씨/주가 → 음악
+//   시계 → 전자앨범 → 날씨/주가 (→ 음악: BLE 음악 리모컨을 켠 경우)
 // 좌우 스와이프 외에 양쪽 화살표 버튼과 하단 페이지 점으로도 이동한다.
 
 #include "ui_internal.h"
 
-#define PAGE_COUNT  4
+#include "sdkconfig.h"
+
 #define ARROW_SIZE  56
 
 static void page_weather_stocks(lv_obj_t *tile)
@@ -23,6 +24,34 @@ static void page_weather_stocks(lv_obj_t *tile)
     lv_obj_set_size(s, LV_PCT(100), LV_PCT(100));
     ui_stocks_create(s, true);
 }
+
+static void page_clock(lv_obj_t *tile)
+{
+    ui_clock_create(tile, true);
+}
+
+static void page_photo(lv_obj_t *tile)
+{
+    lv_obj_set_style_pad_all(tile, 0, 0);   // 사진은 화면 전체 사용
+    ui_photo_create(tile);
+}
+
+#if CONFIG_APP_BLE_MEDIA
+static void page_music(lv_obj_t *tile)
+{
+    ui_music_create(tile, true);
+}
+#endif
+
+static void (*const k_pages[])(lv_obj_t *tile) = {
+    page_clock,
+    page_photo,
+    page_weather_stocks,
+#if CONFIG_APP_BLE_MEDIA
+    page_music,
+#endif
+};
+#define PAGE_COUNT  ((int)(sizeof(k_pages) / sizeof(k_pages[0])))
 
 static int active_index(lv_obj_t *tv)
 {
@@ -90,15 +119,7 @@ lv_obj_t *ui_slide_view_create(void)
         lv_obj_set_style_pad_bottom(tile, 28, 0);
         lv_obj_set_style_pad_top(tile, 4, 0);
 
-        switch (i) {
-        case 0: ui_clock_create(tile, true); break;
-        case 1:
-            lv_obj_set_style_pad_all(tile, 0, 0);   // 사진은 화면 전체 사용
-            ui_photo_create(tile);
-            break;
-        case 2: page_weather_stocks(tile); break;
-        case 3: ui_music_create(tile, true); break;
-        }
+        k_pages[i](tile);
     }
 
     lv_obj_t *dots = lv_obj_create(scr);

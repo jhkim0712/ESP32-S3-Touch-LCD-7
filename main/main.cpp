@@ -8,6 +8,7 @@
 #include "app_storage.h"
 #include "board.h"
 #include "demo_data.h"
+#include "media_ble.h"
 #include "net.h"
 #include "photo.h"
 #include "services.h"
@@ -81,6 +82,6 @@ extern "C" void app_main(void)
              (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
              (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
 
-    // [5-5] BLE 음악 리모컨
+    ESP_ERROR_CHECK(media_ble_start("Smart Display"));   // BLE 음악 리모컨
     // [6단계] ota_start()   : GitHub Release 주기 확인, 부팅 성공 시 rollback 취소
 }

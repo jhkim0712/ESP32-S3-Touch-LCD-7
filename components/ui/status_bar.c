@@ -6,6 +6,7 @@
 
 #include <time.h>
 #include "media_ble.h"
+#include "sdkconfig.h"
 
 static lv_obj_t *s_mode_label;
 
@@ -15,7 +16,7 @@ static void wifi_cb(lv_observer_t *o, lv_subject_t *s)
     lv_obj_set_style_text_color(icon, lv_subject_get_int(s) ? UI_COLOR_ACCENT : UI_COLOR_DIM, 0);
 }
 
-static void ble_cb(lv_observer_t *o, lv_subject_t *s)
+static void __attribute__((unused)) ble_cb(lv_observer_t *o, lv_subject_t *s)
 {
     lv_obj_t *icon = lv_observer_get_target_obj(o);
     int32_t st = lv_subject_get_int(s);
@@ -75,8 +76,10 @@ void ui_status_bar_create(void)
     lv_obj_t *wifi = ui_label(bar, UI_FONT_M, UI_COLOR_DIM, LV_SYMBOL_WIFI);
     lv_subject_add_observer_obj(&ui_subj_wifi, wifi_cb, wifi, NULL);
 
+#if CONFIG_APP_BLE_MEDIA
     lv_obj_t *ble = ui_label(bar, UI_FONT_M, UI_COLOR_DIM, LV_SYMBOL_BLUETOOTH);
     lv_subject_add_observer_obj(&ui_subj_ble, ble_cb, ble, NULL);
+#endif
 
     lv_obj_t *clock = ui_label(bar, UI_FONT_M, UI_COLOR_TEXT, "");
     lv_obj_set_flex_grow(clock, 1);

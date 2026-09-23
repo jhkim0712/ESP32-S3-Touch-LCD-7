@@ -9,7 +9,7 @@
 | 전자앨범 | SD 카드의 JPG/PNG 슬라이드쇼 (PSRAM에서 미리 디코딩) |
 | 날씨 | Open-Meteo API로 현재 기온, 습도, 날씨 아이콘 표시 |
 | 주가 | Yahoo Finance로 AAPL, NVDA, KOSPI(`^KS11`) 등 시세와 등락률 표시 |
-| 음악 리모컨 | BLE로 스마트폰 음악 제어 (iOS: AMS로 곡 정보 표시 + 제어 / Android: 미디어 키 제어) |
+| 음악 리모컨 | BLE로 스마트폰 음악 제어 (iOS: AMS / Android: 미디어 키). 내부 RAM 부족으로 **기본 비활성**, menuconfig `CONFIG_APP_BLE_MEDIA` 로 켤 수 있음 |
 | OTA | GitHub Releases에서 새 버전을 확인하고, 화면 팝업으로 승인하면 HTTPS로 업데이트 |
 | UI | 위젯형(카드 그리드)과 슬라이드형(좌우 스와이프) 두 모드 전환 |
 
@@ -73,6 +73,9 @@ python tools/prepare_photos.py  D:\MyPhotos  F:\photos
   - [x] 5-2 Wi-Fi 연결/스캔, NTP(KST)
   - [x] 5-3 날씨(Open-Meteo), 주가(Yahoo)
   - [x] 5-4 전자앨범 (SD 하위 폴더, JPEG/PNG, EXIF 방향)
-  - [ ] 5-5 BLE 음악 리모컨 (iOS AMS / Android 미디어 키)
+  - [x] 5-5 BLE 음악 리모컨 (iOS AMS / Android 미디어 키) - 코드만 유지, **기본 비활성** (내부 RAM 부족)
   - [ ] 5-6 한글 폰트, 언어 설정(한국어/English), 날씨 아이콘
+  - [ ] 5-7 웹 UI 설정 (`http://smart-display.local`)
+  - [ ] 5-8 웹 UI 사진 업로드 (여러 장) + 자르기
+  - [ ] 5-9 RSS 이미지 피드 동기화 → SD 카드
 - [ ] 6단계 GitHub Release OTA
