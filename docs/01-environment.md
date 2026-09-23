@@ -28,10 +28,10 @@
    idf.py -p COMx flash monitor   # 보드의 USB(UART) 포트
    ```
 4. **Flash 용량 확인** (중요): `esptool.py -p COMx flash_id`
-   - `Detected flash size: 8MB` → 기본 `partitions.csv` 사용
-   - `16MB` → `sdkconfig.defaults` 에서 `FLASHSIZE_16MB`, `partitions_16MB.csv` 로 변경
+   - `16MB` → 기본 `partitions.csv` 사용 (이 보드에서 확인됨)
+   - `8MB` → `sdkconfig.defaults` 에서 `FLASHSIZE_8MB`, `partitions_8MB.csv` 로 변경
 
-> 요구사항 문서에는 16MB Flash로 적혀 있지만, 일반 판매 모델은 **ESP32-S3-WROOM-1-N8R8 (8MB Flash / 8MB Octal PSRAM)** 입니다. 그래서 8MB를 기본값으로 하고 16MB 파티션도 함께 넣었습니다.
+> 실제 보드 부팅 로그(`Detected size(16384k)`)로 **16MB Flash (N16R8) / 8MB Octal PSRAM** 임을 확인했습니다. 8MB 모듈용 파티션(`partitions_8MB.csv`)도 함께 둡니다.
 
 ---
 

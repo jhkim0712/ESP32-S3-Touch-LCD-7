@@ -7,8 +7,8 @@ ESP32-S3-Touch-LCD-7/
 ├── CMakeLists.txt              # IDF 프로젝트 루트
 ├── version.txt                 # 펌웨어 버전 → esp_app_desc.version (OTA 비교 기준)
 ├── sdkconfig.defaults          # PSRAM/LCD/TLS/BLE/LVGL 기본 설정
-├── partitions.csv              # 8MB: nvs | otadata | ota_0 3MB | ota_1 3MB | littlefs 1.9MB
-├── partitions_16MB.csv
+├── partitions.csv              # 16MB: nvs | otadata | ota_0 6MB | ota_1 6MB | littlefs 3.9MB
+├── partitions_8MB.csv          # 8MB 모듈용 (ota 3MB x2, littlefs 1.9MB)
 ├── dependencies.lock           # (첫 빌드 후 생성, 커밋)
 │
 ├── main/                       # 초기화 순서만 담당

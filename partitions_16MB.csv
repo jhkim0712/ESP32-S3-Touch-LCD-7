@@ -1,9 +1,0 @@
-# 16MB flash (N16R8)
-# To use: set CONFIG_ESPTOOLPY_FLASHSIZE_16MB and this file name in sdkconfig.defaults
-# Name,     Type, SubType,  Offset,   Size,     Flags
-nvs,        data, nvs,      0x9000,   0x6000,
-otadata,    data, ota,      0xF000,   0x2000,
-phy_init,   data, phy,      0x11000,  0x1000,
-ota_0,      app,  ota_0,    0x20000,  0x600000,
-ota_1,      app,  ota_1,    0x620000, 0x600000,
-storage,    data, littlefs, 0xC20000, 0x3E0000,
