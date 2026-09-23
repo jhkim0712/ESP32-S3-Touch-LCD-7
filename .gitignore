@@ -17,6 +17,7 @@ sdkconfig.old
 .clangd
 .cache/
 compile_commands.json
+dependencies.lock
 
 # ---- Python / misc ----
 __pycache__/
