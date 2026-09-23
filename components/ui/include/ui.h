@@ -16,6 +16,8 @@ extern "C" {
 // 회전 0° 이면 board 를 프레임버퍼 2개로, 그 외에는 1개로 초기화해야 한다 (ui_board_num_fbs).
 esp_err_t ui_init(const board_handles_t *hw, ui_mode_t initial_mode, ui_rotation_t rotation);
 uint8_t   ui_board_num_fbs(ui_rotation_t rotation);
+// 전자앨범 페이지에서 사진이 차지하는 영역 (화면 - 상태 표시줄, 회전 반영)
+void      ui_photo_area(ui_rotation_t rotation, uint16_t *w, uint16_t *h);
 void      ui_set_mode(ui_mode_t mode);   // 위젯형 ↔ 슬라이드형 (애니메이션 전환)
 ui_mode_t ui_get_mode(void);
 

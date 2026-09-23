@@ -148,6 +148,13 @@ uint8_t ui_board_num_fbs(ui_rotation_t rotation)
     return rotation == UI_ROTATION_0 ? 2 : 1;
 }
 
+void ui_photo_area(ui_rotation_t rotation, uint16_t *w, uint16_t *h)
+{
+    bool portrait = rotation == UI_ROTATION_90 || rotation == UI_ROTATION_270;
+    *w = portrait ? BOARD_LCD_V_RES : BOARD_LCD_H_RES;
+    *h = (portrait ? BOARD_LCD_H_RES : BOARD_LCD_V_RES) - UI_STATUS_BAR_H;
+}
+
 static lv_display_rotation_t to_lv_rotation(ui_rotation_t r)
 {
     switch (r) {

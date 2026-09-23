@@ -51,6 +51,14 @@ components/
 docs/            설계 문서
 ```
 
+## 전자앨범 사진 준비
+SD 카드 `photos/` 폴더(하위 폴더 4단계까지)에 JPG/PNG 를 넣습니다. 기기의 JPEG 디코더는
+baseline JPEG 만 지원하고 PNG 는 약 600x400 이하만 풀 수 있으므로, PC 에서 변환해 넣는 것을 권장합니다.
+```powershell
+pip install pillow        # 아이폰 HEIC: pip install pillow-heif
+python tools/prepare_photos.py  D:\MyPhotos  F:\photos
+```
+
 ## 문서
 - [1단계 — 개발 환경 및 라이브러리](docs/01-environment.md)
 - [2단계 — 폴더 구조 및 아키텍처](docs/02-architecture.md)
@@ -60,5 +68,11 @@ docs/            설계 문서
 - [x] 2단계 폴더 구조, 모듈 인터페이스 헤더
 - [x] 3단계 드라이버 + LVGL 바인딩 (진단 화면)
 - [x] 4단계 UI (위젯형 / 슬라이드형, 데모 데이터)
-- [ ] 5단계 FreeRTOS 서비스 태스크
+- [ ] 5단계 서비스
+  - [x] 5-1 NVS 설정, 설정 페이지, 화면 회전
+  - [x] 5-2 Wi-Fi 연결/스캔, NTP(KST)
+  - [x] 5-3 날씨(Open-Meteo), 주가(Yahoo)
+  - [x] 5-4 전자앨범 (SD 하위 폴더, JPEG/PNG, EXIF 방향)
+  - [ ] 5-5 BLE 음악 리모컨 (iOS AMS / Android 미디어 키)
+  - [ ] 5-6 한글 폰트, 언어 설정(한국어/English), 날씨 아이콘
 - [ ] 6단계 GitHub Release OTA

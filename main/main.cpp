@@ -9,6 +9,7 @@
 #include "board.h"
 #include "demo_data.h"
 #include "net.h"
+#include "photo.h"
 #include "services.h"
 #include "ui.h"
 
@@ -68,8 +69,11 @@ extern "C" void app_main(void)
     ESP_ERROR_CHECK(time_sync_start());
     ESP_ERROR_CHECK(net_worker_start());   // 날씨/주가
 
-    // SD 카드가 없어도 부팅은 계속한다 (전자앨범만 비활성)
+    // SD 카드가 없어도 부팅은 계속한다 (전자앨범은 /storage/photos 를 대신 찾는다)
     board_sdcard_mount();
+    uint16_t photo_w, photo_h;
+    ui_photo_area(settings.rotation, &photo_w, &photo_h);
+    ESP_ERROR_CHECK(photo_start(CONFIG_APP_PHOTO_DIR, settings.photo_interval_s, photo_w, photo_h));
 
     demo_data_start();
 
@@ -77,6 +81,6 @@ extern "C" void app_main(void)
              (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
              (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
 
-    // [5-4] 전자앨범, [5-5] BLE 음악 리모컨
+    // [5-5] BLE 음악 리모컨
     // [6단계] ota_start()   : GitHub Release 주기 확인, 부팅 성공 시 rollback 취소
 }

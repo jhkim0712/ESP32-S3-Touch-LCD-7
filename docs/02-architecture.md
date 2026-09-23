@@ -138,11 +138,26 @@ net_worker(core0) ─ http_get_alloc(open-meteo) ─ cJSON 파싱 ─ app_state_
 - **터치:** `lv_display_set_rotation()`을 쓰면 LVGL이 터치 좌표도 함께 변환하므로 GT911 설정은 그대로 둡니다.
 - **UI 레이아웃(4단계):** 좌표를 고정하지 않고 flex/grid로 만들어 가로와 세로 모두에서 동작하게 합니다.
 
-## 2.7 단계별 구현 로드맵
+## 2.7 한글 폰트와 언어 설정 (5-6)
+
+- **폰트:** LVGL Tiny TTF 로 Noto Sans KR 서브셋 TTF 를 LittleFS(`/storage/fonts`)에서 읽어 런타임에 렌더링합니다.
+  한 파일로 14/20/28/48px 크기를 모두 만들고, 글리프 캐시는 PSRAM 에 둡니다. 곡명처럼 임의의 한글이 나오므로
+  완성형 2,350자가 아니라 현대 한글 11,172자 전체 + 라틴 문자를 포함합니다 (약 1.5~2MB).
+- **기호:** LVGL 기호(`LV_SYMBOL_*`, 와이파이·재생 버튼 등)는 Montserrat 에 있으므로 한글 폰트의 fallback 으로 연결합니다.
+- **언어 설정:** 설정 페이지에 한국어 / English 선택을 추가하고 NVS 에 저장합니다. UI 문자열은 언어별 표로 관리하고,
+  바꾸면 현재 화면을 다시 만들어 바로 적용합니다(재부팅 불필요). 날짜 형식("9월 23일 (수)"), 날씨 상태 문구도 함께 바뀝니다.
+- **날씨 아이콘:** 상태별 색 원 대신 PNG 아이콘을 LittleFS 에 넣어 표시합니다.
+
+## 2.8 단계별 구현 로드맵
 
 | 단계 | 산출물 |
 |---|---|
 | 3 | `board/*` 구현, `ui_core` LVGL 바인딩 (PSRAM 프레임버퍼 + bounce buffer + GT911) |
 | 4 | 테마, `widget_view`, `slide_view`, 모드 전환, 각 페이지 레이아웃 |
-| 5 | `app_core`, `storage`(NVS 설정: Wi-Fi, UI 모드, **화면 회전**, 간격, 종목), `net`, `services`, `media_ble`, `photo` + FreeRTOS 태스크 |
+| 5-1 | `storage`: NVS 설정(Wi-Fi, UI 모드, 화면 회전, 사진 간격, 종목), 설정 페이지 |
+| 5-2 | `net`: Wi-Fi 연결/스캔, SNTP |
+| 5-3 | `services`: 날씨, 주가 (`net_worker` 에서 HTTPS 직렬 처리) |
+| 5-4 | `photo`: 전자앨범 (ROM TJpgDec 스트리밍 디코딩, PNG, EXIF 방향) |
+| 5-5 | `media_ble`: BLE 음악 리모컨 (iOS AMS / Android HID 미디어 키) |
+| 5-6 | 한글 폰트 + 언어 설정 + 날씨 아이콘 (아래 2.7 참고) |
 | 6 | `ota` + GitHub Actions 릴리스 워크플로 |

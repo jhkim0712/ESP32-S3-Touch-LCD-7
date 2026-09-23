@@ -30,6 +30,8 @@ static void photo_cb(lv_observer_t *o, lv_subject_t *s)
 
     lv_image_dsc_t *d = &v->dsc[v->next];
     v->next ^= 1;
+    // 디스크립터 주소를 재사용하지만 LVGL 이미지 캐시가 꺼져 있어(LV_CACHE_DEF_SIZE=0)
+    // 이전 사진이 남지 않는다. 캐시를 켜면 여기서 lv_image_cache_drop(d) 가 필요하다.
     lv_memzero(d, sizeof(*d));
     d->header.magic = LV_IMAGE_HEADER_MAGIC;
     d->header.cf = LV_COLOR_FORMAT_RGB565;

@@ -1,5 +1,6 @@
-# SRCS to be added in step 5: photo_loader.c
 idf_component_register(
+    SRCS "photo_loader.c"
     INCLUDE_DIRS "include"
-    REQUIRES app_core board esp_jpeg
+    REQUIRES app_core
+    PRIV_REQUIRES board storage esp_rom esp_timer lvgl
 )

@@ -1,3 +1,0 @@
-dependencies:
-  idf: ">=6.1.0"
-  espressif/esp_jpeg: "^1.0.5"
