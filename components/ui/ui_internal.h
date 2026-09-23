@@ -33,7 +33,8 @@ extern lv_subject_t ui_subj_weather;    // int: 갱신 카운터 → app_state_g
 extern lv_subject_t ui_subj_stocks;     // int: 갱신 카운터 → app_state_get_stocks()
 extern lv_subject_t ui_subj_media;      // int: 갱신 카운터 → app_state_get_media()
 extern lv_subject_t ui_subj_photo;      // pointer: const photo_frame_t *
-extern lv_subject_t ui_subj_wifi;       // int: 0/1
+extern lv_subject_t ui_subj_wifi;       // int: 0/1 (IP 는 app_state_get_ip)
+extern lv_subject_t ui_subj_wifi_scan;  // int: 스캔 완료 카운터 → app_state_get_wifi_scan()
 extern lv_subject_t ui_subj_ble;        // int: ble_state_t
 
 // ---- theme / 공통 ----

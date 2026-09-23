@@ -33,6 +33,7 @@ lv_subject_t ui_subj_stocks;
 lv_subject_t ui_subj_media;
 lv_subject_t ui_subj_photo;
 lv_subject_t ui_subj_wifi;
+lv_subject_t ui_subj_wifi_scan;
 lv_subject_t ui_subj_ble;
 
 static lv_display_t *s_disp;
@@ -52,6 +53,7 @@ static void subjects_init(void)
     lv_subject_init_int(&ui_subj_media, 0);
     lv_subject_init_pointer(&ui_subj_photo, NULL);
     lv_subject_init_int(&ui_subj_wifi, 0);
+    lv_subject_init_int(&ui_subj_wifi_scan, 0);
     lv_subject_init_int(&ui_subj_ble, BLE_STATE_IDLE);
 }
 
@@ -78,6 +80,7 @@ static void apply_event(void *p)
     switch (msg->id) {
     case APP_EVT_WIFI_CONNECTED:    lv_subject_set_int(&ui_subj_wifi, 1); break;
     case APP_EVT_WIFI_DISCONNECTED: lv_subject_set_int(&ui_subj_wifi, 0); break;
+    case APP_EVT_WIFI_SCAN_DONE:    bump(&ui_subj_wifi_scan); break;
     case APP_EVT_TIME_SYNCED:       lv_subject_set_int(&ui_subj_time, (int32_t)time(NULL)); break;
     case APP_EVT_WEATHER_UPDATED:   bump(&ui_subj_weather); break;
     case APP_EVT_STOCKS_UPDATED:    bump(&ui_subj_stocks); break;
@@ -102,6 +105,7 @@ static void on_app_event(void *arg, esp_event_base_t base, int32_t id, void *dat
     switch (id) {
     case APP_EVT_WIFI_CONNECTED:
     case APP_EVT_WIFI_DISCONNECTED:
+    case APP_EVT_WIFI_SCAN_DONE:
     case APP_EVT_TIME_SYNCED:
     case APP_EVT_WEATHER_UPDATED:
     case APP_EVT_STOCKS_UPDATED:

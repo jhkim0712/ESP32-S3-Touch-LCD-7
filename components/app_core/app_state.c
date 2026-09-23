@@ -13,6 +13,8 @@ static SemaphoreHandle_t s_lock;
 static weather_info_t    s_weather;
 static stock_list_t      s_stocks;
 static media_info_t      s_media;
+static wifi_scan_t       s_scan;
+static char              s_ip[16];
 
 esp_err_t app_state_init(void)
 {
@@ -61,3 +63,20 @@ void app_state_get_stocks(stock_list_t *out)        { STATE_GET(out, s_stocks); 
 
 void app_state_set_media(const media_info_t *m)     { STATE_SET(s_media, m, APP_EVT_MEDIA_UPDATED); }
 void app_state_get_media(media_info_t *out)         { STATE_GET(out, s_media); }
+
+void app_state_set_wifi_scan(const wifi_scan_t *s)  { STATE_SET(s_scan, s, APP_EVT_WIFI_SCAN_DONE); }
+void app_state_get_wifi_scan(wifi_scan_t *out)      { STATE_GET(out, s_scan); }
+
+void app_state_set_ip(const char *ip)
+{
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    strlcpy(s_ip, ip ? ip : "", sizeof(s_ip));
+    xSemaphoreGive(s_lock);
+}
+
+void app_state_get_ip(char *out, size_t size)
+{
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    strlcpy(out, s_ip, size);
+    xSemaphoreGive(s_lock);
+}

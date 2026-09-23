@@ -1,7 +1,8 @@
 // 설정 페이지 (상태 표시줄의 톱니바퀴 버튼)
-//   Wi-Fi SSID/비밀번호, 화면 회전, 사진 전환 간격, 주식 종목, 기기 정보
-// [Save] → NVS 저장 + APP_EVT_SETTINGS_CHANGED. 회전이 바뀌었으면 재부팅을 묻는다.
-// Wi-Fi 목록 스캔은 Wi-Fi 연결 기능(5-2)과 함께 추가한다.
+//   Wi-Fi SSID(직접 입력 또는 [Scan] 목록에서 선택)/비밀번호, 연결 상태,
+//   화면 회전, 사진 전환 간격, 주식 종목, 기기 정보
+// [Save] → NVS 저장 + APP_EVT_SETTINGS_CHANGED (Wi-Fi 는 새 설정으로 재연결).
+// 회전이 바뀌었으면 재부팅을 묻는다.
 
 #include "ui_internal.h"
 
@@ -17,6 +18,7 @@
 typedef struct {
     lv_obj_t *ssid;
     lv_obj_t *pass;
+    lv_obj_t *wifi_status;
     lv_obj_t *rotation;
     lv_obj_t *photo;
     lv_obj_t *symbols;
@@ -128,6 +130,144 @@ static lv_obj_t *dropdown(lv_obj_t *parent, const char *options, uint32_t select
     return dd;
 }
 
+// ---- Wi-Fi 스캔 목록 ----
+
+typedef struct {
+    settings_view_t *view;
+    int32_t          start_count;   // 열었을 때의 스캔 카운터 (이전 결과를 보여주지 않기 위함)
+} scan_dialog_t;
+
+static void on_ap_selected(lv_event_t *e)
+{
+    lv_obj_t *btn = lv_event_get_current_target(e);
+    lv_obj_t *mbox = lv_event_get_user_data(e);
+    scan_dialog_t *d = lv_obj_get_user_data(mbox);
+    settings_view_t *v = d->view;
+
+    lv_textarea_set_text(v->ssid, lv_label_get_text(lv_obj_get_child(btn, 0)));
+    lv_textarea_set_text(v->pass, "");
+    lv_msgbox_close(mbox);
+
+    // 비밀번호 칸으로 이동해 키보드를 띄운다
+    lv_obj_add_state(v->pass, LV_STATE_FOCUSED);
+    lv_obj_send_event(v->pass, LV_EVENT_FOCUSED, NULL);
+}
+
+static const char *signal_text(int8_t rssi)
+{
+    return rssi >= -55 ? "Excellent" : rssi >= -67 ? "Good" : rssi >= -75 ? "Fair" : "Weak";
+}
+
+static void scan_result_cb(lv_observer_t *o, lv_subject_t *subj)
+{
+    lv_obj_t *mbox = lv_observer_get_target_obj(o);
+    scan_dialog_t *d = lv_obj_get_user_data(mbox);
+    if (lv_subject_get_int(subj) == d->start_count) {
+        return;   // 아직 새 결과 없음 (스피너 유지)
+    }
+
+    wifi_scan_t *scan = lv_malloc(sizeof(wifi_scan_t));
+    if (!scan) {
+        return;
+    }
+    app_state_get_wifi_scan(scan);
+
+    lv_obj_t *content = lv_msgbox_get_content(mbox);
+    lv_obj_clean(content);
+    if (scan->count == 0) {
+        ui_label(content, UI_FONT_M, UI_COLOR_DIM, "No networks found");
+    }
+    for (int i = 0; i < scan->count; i++) {
+        const wifi_ap_t *ap = &scan->aps[i];
+        lv_obj_t *btn = lv_button_create(content);
+        lv_obj_set_width(btn, LV_PCT(100));
+        lv_obj_set_style_bg_color(btn, UI_COLOR_CARD_ALT, 0);
+        lv_obj_set_style_shadow_width(btn, 0, 0);
+        lv_obj_set_flex_flow(btn, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(btn, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_add_event_cb(btn, on_ap_selected, LV_EVENT_CLICKED, mbox);
+
+        lv_obj_t *name = ui_label(btn, UI_FONT_M, UI_COLOR_TEXT, ap->ssid);   // child 0 = SSID
+        lv_obj_set_flex_grow(name, 1);
+        lv_label_set_long_mode(name, LV_LABEL_LONG_MODE_DOTS);
+        lv_obj_t *info = ui_label(btn, UI_FONT_S, UI_COLOR_DIM, "");
+        lv_label_set_text_fmt(info, "%s%s  %d dBm", ap->secure ? LV_SYMBOL_EYE_CLOSE "  " : "",
+                              signal_text(ap->rssi), ap->rssi);
+    }
+    lv_free(scan);
+}
+
+static void on_scan_close(lv_event_t *e)
+{
+    lv_msgbox_close(lv_event_get_user_data(e));
+}
+
+static lv_obj_t *s_scan_mbox;   // 설정 화면이 닫히면 함께 닫는다 (view 포인터 보호)
+
+static void start_scan(lv_obj_t *mbox)
+{
+    scan_dialog_t *d = lv_obj_get_user_data(mbox);
+    d->start_count = lv_subject_get_int(&ui_subj_wifi_scan);
+    lv_obj_t *content = lv_msgbox_get_content(mbox);
+    lv_obj_clean(content);
+    lv_obj_t *spinner = lv_spinner_create(content);
+    lv_obj_set_size(spinner, 48, 48);
+    ui_label(content, UI_FONT_M, UI_COLOR_DIM, "Scanning...");
+    app_event_post(APP_EVT_REQ_WIFI_SCAN, NULL, 0);
+}
+
+static void on_scan_rescan(lv_event_t *e)
+{
+    start_scan(lv_event_get_user_data(e));
+}
+
+static void on_scan_mbox_deleted(lv_event_t *e)
+{
+    s_scan_mbox = NULL;
+}
+
+static void on_scan(lv_event_t *e)
+{
+    settings_view_t *v = lv_event_get_user_data(e);
+    lv_obj_t *mbox = lv_msgbox_create(NULL);
+    lv_obj_set_size(mbox, ui_is_portrait() ? LV_PCT(92) : 560, LV_PCT(80));
+    lv_msgbox_add_title(mbox, LV_SYMBOL_WIFI "  Wi-Fi networks");
+
+    scan_dialog_t *d = lv_malloc_zeroed(sizeof(scan_dialog_t));
+    d->view = v;
+    lv_obj_set_user_data(mbox, d);
+    ui_free_user_data_on_delete(mbox);
+    s_scan_mbox = mbox;
+    lv_obj_add_event_cb(mbox, on_scan_mbox_deleted, LV_EVENT_DELETE, NULL);
+
+    lv_obj_t *content = lv_msgbox_get_content(mbox);
+    lv_obj_set_flex_grow(content, 1);
+    lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(content, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_row(content, 6, 0);
+
+    lv_obj_add_event_cb(lv_msgbox_add_footer_button(mbox, LV_SYMBOL_REFRESH "  Rescan"), on_scan_rescan,
+                        LV_EVENT_CLICKED, mbox);
+    lv_obj_add_event_cb(lv_msgbox_add_footer_button(mbox, "Cancel"), on_scan_close, LV_EVENT_CLICKED, mbox);
+
+    start_scan(mbox);   // 스피너 표시 + 스캔 요청
+    lv_subject_add_observer_obj(&ui_subj_wifi_scan, scan_result_cb, mbox, NULL);
+}
+
+static void wifi_status_cb(lv_observer_t *o, lv_subject_t *subj)
+{
+    lv_obj_t *label = lv_observer_get_target_obj(o);
+    char ip[16];
+    app_state_get_ip(ip, sizeof(ip));
+    if (lv_subject_get_int(subj) && ip[0]) {
+        lv_label_set_text_fmt(label, LV_SYMBOL_OK "  Connected  -  IP %s", ip);
+        lv_obj_set_style_text_color(label, UI_COLOR_ACCENT, 0);
+    } else {
+        lv_label_set_text(label, "Not connected");
+        lv_obj_set_style_text_color(label, UI_COLOR_DIM, 0);
+    }
+}
+
 // ---- 동작 ----
 
 static void on_back(lv_event_t *e)
@@ -177,6 +317,9 @@ static void on_save(lv_event_t *e)
 static void on_screen_deleted(lv_event_t *e)
 {
     s_screen = NULL;
+    if (s_scan_mbox) {
+        lv_msgbox_close(s_scan_mbox);   // 모달 배경까지 함께 삭제
+    }
 }
 
 void ui_settings_open(void)
@@ -231,8 +374,15 @@ void ui_settings_open(void)
     lv_obj_set_scroll_dir(body, LV_DIR_VER);
 
     lv_obj_t *card = section(body, LV_SYMBOL_WIFI, "Wi-Fi");
-    v->ssid = text_field(row(card, "SSID"), v, s.wifi_ssid, sizeof(s.wifi_ssid) - 1, false);
+    lv_obj_t *ssid_row = row(card, "SSID");
+    v->ssid = text_field(ssid_row, v, s.wifi_ssid, sizeof(s.wifi_ssid) - 1, false);
+    lv_obj_t *scan = lv_button_create(ssid_row);
+    lv_obj_set_style_bg_color(scan, UI_COLOR_CARD_ALT, 0);
+    lv_obj_add_event_cb(scan, on_scan, LV_EVENT_CLICKED, v);
+    lv_obj_center(ui_label(scan, UI_FONT_M, UI_COLOR_TEXT, LV_SYMBOL_WIFI "  Scan"));
     v->pass = text_field(row(card, "Password"), v, s.wifi_pass, sizeof(s.wifi_pass) - 1, true);
+    v->wifi_status = hint(card, "");
+    lv_subject_add_observer_obj(&ui_subj_wifi, wifi_status_cb, v->wifi_status, NULL);
 
     card = section(body, LV_SYMBOL_IMAGE, "Display");
     v->rotation = dropdown(row(card, "Rotation"), k_rotation_opts, s.rotation);

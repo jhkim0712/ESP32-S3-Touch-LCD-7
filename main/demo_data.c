@@ -1,5 +1,5 @@
 // UI 확인용 가짜 데이터 공급기 (CONFIG_APP_UI_DEMO_DATA)
-//   - 시각: 동기화 전이면 2026-09-23 21:30 KST 로 설정
+//   (시각과 Wi-Fi 는 실제 서비스(5-2)가 담당하므로 흉내 내지 않는다)
 //   - 날씨/주가/음악: 샘플 값, 주가는 5초마다 무작위 변동, 재생 시간은 1초마다 증가
 //   - 음악 버튼: 재생/일시정지/이전/다음 동작을 흉내
 //   - 30초 후 OTA 팝업 1회, "Update" 누르면 진행률만 흉내 (재부팅 안 함)
@@ -10,7 +10,6 @@
 #if CONFIG_APP_UI_DEMO_DATA
 
 #include <string.h>
-#include <sys/time.h>
 #include <time.h>
 #include "app_state.h"
 #include "esp_log.h"
@@ -71,21 +70,8 @@ static void on_request(void *arg, esp_event_base_t base, int32_t id, void *data)
     }
 }
 
-static void set_demo_time(void)
-{
-    if (time(NULL) > 1735689600) {   // 2025-01-01 이후면 이미 동기화된 것
-        return;
-    }
-    struct tm tm = { .tm_year = 2026 - 1900, .tm_mon = 8, .tm_mday = 23, .tm_hour = 21, .tm_min = 30 };
-    struct timeval tv = { .tv_sec = mktime(&tm) };   // TZ(KST) 기준 해석
-    settimeofday(&tv, NULL);
-    app_event_post(APP_EVT_TIME_SYNCED, NULL, 0);
-}
-
 static void demo_task(void *arg)
 {
-    set_demo_time();
-    app_event_post(APP_EVT_WIFI_CONNECTED, NULL, 0);
     ble_state_t ble = BLE_STATE_CONNECTED;
     app_event_post(APP_EVT_BLE_STATE, &ble, sizeof(ble));
 

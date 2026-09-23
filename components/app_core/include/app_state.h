@@ -17,8 +17,9 @@ ESP_EVENT_DECLARE_BASE(APP_EVENT);
 
 typedef enum {
     // 서비스 → UI
-    APP_EVT_WIFI_CONNECTED,
+    APP_EVT_WIFI_CONNECTED,      // IP 획득 (app_state_get_ip)
     APP_EVT_WIFI_DISCONNECTED,
+    APP_EVT_WIFI_SCAN_DONE,      // app_state_get_wifi_scan()
     APP_EVT_TIME_SYNCED,
     APP_EVT_WEATHER_UPDATED,
     APP_EVT_STOCKS_UPDATED,
@@ -31,6 +32,7 @@ typedef enum {
 
     // UI → 서비스
     APP_EVT_REQ_REFRESH,         // 날씨/주가 즉시 갱신
+    APP_EVT_REQ_WIFI_SCAN,       // 설정 페이지의 Wi-Fi 스캔
     APP_EVT_REQ_MEDIA_CMD,       // data: media_cmd_t (media_ble.h)
     APP_EVT_REQ_PHOTO_NEXT,
     APP_EVT_REQ_PHOTO_PREV,
@@ -39,7 +41,19 @@ typedef enum {
     APP_EVT_SETTINGS_CHANGED,    // 설정 페이지에서 저장됨 → 서비스가 settings_load() 로 다시 읽음
 } app_event_id_t;
 
-#define APP_MAX_STOCKS 8
+#define APP_MAX_STOCKS  8
+#define APP_MAX_WIFI_AP 16
+
+typedef struct {
+    char   ssid[33];
+    int8_t rssi;
+    bool   secure;      // 비밀번호 필요
+} wifi_ap_t;
+
+typedef struct {
+    int       count;
+    wifi_ap_t aps[APP_MAX_WIFI_AP];     // 신호 세기 순, SSID 중복 제거
+} wifi_scan_t;
 
 typedef struct {
     bool     valid;
@@ -88,6 +102,12 @@ void app_state_get_stocks(stock_list_t *out);
 
 void app_state_set_media(const media_info_t *m);
 void app_state_get_media(media_info_t *out);
+
+void app_state_set_wifi_scan(const wifi_scan_t *scan);   // APP_EVT_WIFI_SCAN_DONE 발행
+void app_state_get_wifi_scan(wifi_scan_t *out);
+
+void app_state_set_ip(const char *ip);                   // 이벤트 발행 안 함
+void app_state_get_ip(char *out, size_t size);           // 연결 안 됨: ""
 
 #ifdef __cplusplus
 }
