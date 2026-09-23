@@ -1,0 +1,100 @@
+# NOTE: keep ASCII-only (kconfgen uses the system locale on Windows).
+menu "Smart Display Configuration"
+
+    menu "Wi-Fi"
+        config APP_WIFI_SSID
+            string "Default Wi-Fi SSID"
+            default ""
+            help
+                Development default. Leave empty to enter it on the on-screen
+                Wi-Fi settings page; the value saved in NVS takes precedence.
+
+        config APP_WIFI_PASSWORD
+            string "Default Wi-Fi password"
+            default ""
+    endmenu
+
+    menu "Time (NTP)"
+        config APP_NTP_SERVER_1
+            string "NTP server 1"
+            default "kr.pool.ntp.org"
+        config APP_NTP_SERVER_2
+            string "NTP server 2"
+            default "time.google.com"
+        config APP_TZ
+            string "POSIX TZ string"
+            default "KST-9"
+            help
+                Korea Standard Time (UTC+9). POSIX TZ uses the inverted sign, hence KST-9.
+    endmenu
+
+    menu "Weather (Open-Meteo)"
+        config APP_WEATHER_LAT
+            string "Latitude"
+            default "37.5665"
+        config APP_WEATHER_LON
+            string "Longitude"
+            default "126.9780"
+        config APP_WEATHER_CITY
+            string "City label"
+            default "Seoul"
+        config APP_WEATHER_REFRESH_MIN
+            int "Refresh interval (minutes)"
+            range 5 180
+            default 15
+    endmenu
+
+    menu "Stocks"
+        choice APP_STOCK_PROVIDER
+            prompt "Quote provider"
+            default APP_STOCK_PROVIDER_YAHOO
+            config APP_STOCK_PROVIDER_YAHOO
+                bool "Yahoo Finance (unofficial v8 chart API, no key)"
+            config APP_STOCK_PROVIDER_ALPHAVANTAGE
+                bool "Alpha Vantage (free tier: 25 req/day)"
+        endchoice
+
+        config APP_STOCK_API_KEY
+            string "API key (Alpha Vantage)"
+            depends on APP_STOCK_PROVIDER_ALPHAVANTAGE
+            default ""
+
+        config APP_STOCK_SYMBOLS
+            string "Symbols (comma separated)"
+            default "AAPL,NVDA,^KS11,005930.KS"
+            help
+                Yahoo symbols. ^KS11 = KOSPI, ^KQ11 = KOSDAQ, 005930.KS = Samsung Electronics.
+
+        config APP_STOCK_REFRESH_SEC
+            int "Refresh interval (seconds)"
+            range 30 3600
+            default 60
+    endmenu
+
+    menu "Photo Frame"
+        config APP_PHOTO_DIR
+            string "Photo directory on SD card"
+            default "/sdcard/photos"
+        config APP_PHOTO_INTERVAL_SEC
+            int "Slideshow interval (seconds)"
+            range 3 3600
+            default 10
+    endmenu
+
+    menu "OTA (GitHub Releases)"
+        config APP_OTA_GITHUB_OWNER
+            string "GitHub owner"
+            default "jhkim0712"
+        config APP_OTA_GITHUB_REPO
+            string "GitHub repository"
+            default "ESP32-S3-Touch-LCD-7"
+        config APP_OTA_ASSET_NAME
+            string "Release asset file name"
+            default "smart_display.bin"
+        config APP_OTA_CHECK_INTERVAL_H
+            int "Check interval (hours)"
+            range 1 168
+            default 6
+    endmenu
+
+endmenu

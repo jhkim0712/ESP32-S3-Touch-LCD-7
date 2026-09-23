@@ -1,0 +1,26 @@
+# ---- ESP-IDF build output ----
+build/
+managed_components/
+*.bin
+*.elf
+*.map
+
+# ---- Local configuration ----
+# sdkconfig may contain Wi-Fi passwords / API keys.
+# Reproducible settings live in sdkconfig.defaults + dependencies.lock.
+sdkconfig
+sdkconfig.old
+
+# ---- Editor / IDE ----
+.vscode/
+.idea/
+.clangd
+.cache/
+compile_commands.json
+
+# ---- Python / misc ----
+__pycache__/
+*.pyc
+*.log
+.DS_Store
+Thumbs.db

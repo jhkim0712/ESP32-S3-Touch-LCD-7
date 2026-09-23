@@ -1,0 +1,8 @@
+## External libraries are declared in the idf_component.yml of the component that uses them:
+##   board   : esp_lcd_touch_gt911
+##   ui      : lvgl, esp_lvgl_port
+##   photo   : esp_jpeg
+##   storage : littlefs
+## Resolved versions are pinned in dependencies.lock (commit it).
+dependencies:
+  idf: ">=5.3.0"
