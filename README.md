@@ -59,6 +59,11 @@ pip install pillow        # 아이폰 HEIC: pip install pillow-heif
 python tools/prepare_photos.py  D:\MyPhotos  F:\photos
 ```
 
+## 폰트 (LittleFS)
+`assets/` 폴더는 빌드 때 LittleFS 이미지로 만들어져 `idf.py flash` 로 함께 기록됩니다 (storage 파티션을 덮어씀).
+한글 폰트(Noto Sans KR 서브셋)와 날씨 아이콘 폰트(Weather Icons)는 `tools/make_fonts.py` 로 다시 만들 수 있습니다
+(`pip install fonttools`). 두 폰트 모두 SIL OFL 1.1 이며 라이선스 파일이 `assets/fonts/` 에 있습니다.
+
 ## 문서
 - [1단계 — 개발 환경 및 라이브러리](docs/01-environment.md)
 - [2단계 — 폴더 구조 및 아키텍처](docs/02-architecture.md)
@@ -74,7 +79,7 @@ python tools/prepare_photos.py  D:\MyPhotos  F:\photos
   - [x] 5-3 날씨(Open-Meteo), 주가(Yahoo)
   - [x] 5-4 전자앨범 (SD 하위 폴더, JPEG/PNG, EXIF 방향)
   - [x] 5-5 BLE 음악 리모컨 (iOS AMS / Android 미디어 키) - 코드만 유지, **기본 비활성** (내부 RAM 부족)
-  - [ ] 5-6 한글 폰트, 언어 설정(한국어/English), 날씨 아이콘
+  - [x] 5-6 한글 폰트, 언어 설정(한국어/English), 날씨 아이콘
   - [ ] 5-7 웹 UI 설정 (`http://smart-display.local`)
   - [ ] 5-8 웹 UI 사진 업로드 (여러 장) + 자르기
   - [ ] 5-9 RSS 이미지 피드 동기화 → SD 카드

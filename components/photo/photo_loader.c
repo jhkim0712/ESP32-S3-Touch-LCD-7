@@ -376,7 +376,10 @@ static esp_err_t decode_png(FILE *f, const char *path, photo_frame_t *frame)
     fseek(f, 0, SEEK_END);
     long size = ftell(f);
     fseek(f, 0, SEEK_SET);
-    ESP_RETURN_ON_FALSE(size > 0 && size <= PNG_MAX_FILE, ESP_ERR_INVALID_SIZE, TAG, "png file too large");
+    if (size <= 0 || size > PNG_MAX_FILE) {
+        ESP_LOGW(TAG, "skip %s: png file %ld KB too large (max %d KB)", path, size / 1024, PNG_MAX_FILE / 1024);
+        return ESP_ERR_INVALID_SIZE;
+    }
 
     uint8_t *in = heap_caps_malloc(size, MALLOC_CAP_SPIRAM);
     ESP_RETURN_ON_FALSE(in, ESP_ERR_NO_MEM, TAG, "png file buffer");

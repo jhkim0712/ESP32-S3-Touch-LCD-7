@@ -13,6 +13,9 @@ extern "C" {
 
 typedef enum { UI_MODE_WIDGET = 0, UI_MODE_SLIDE = 1 } ui_mode_t;
 
+// UI 언어. 한글 폰트(/storage/fonts)를 불러오지 못하면 UI 는 영어로 표시한다.
+typedef enum { APP_LANG_EN = 0, APP_LANG_KO = 1 } app_lang_t;
+
 // 화면 회전 (터치 좌표도 LVGL 이 함께 변환). 변경 시 재부팅 후 적용.
 //   0      : 800x480, 프레임버퍼 2개에 직접 렌더링 + tearing 방지
 //   90/270 : 480x800, 부분 버퍼 → RGB 드라이버가 회전 복사 (프레임버퍼 1개)
@@ -29,6 +32,7 @@ typedef struct {
     char          wifi_pass[65];
     ui_mode_t     ui_mode;
     ui_rotation_t rotation;
+    app_lang_t    language;
     int           photo_interval_s;
     char          stock_symbols[128];
 } app_settings_t;

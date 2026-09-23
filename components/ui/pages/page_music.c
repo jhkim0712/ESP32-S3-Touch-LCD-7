@@ -32,7 +32,7 @@ static void media_cb(lv_observer_t *o, lv_subject_t *s)
     }
     app_state_get_media(m);
 
-    lv_label_set_text(v->title, m->title[0] ? m->title : "Nothing playing");
+    lv_label_set_text(v->title, m->title[0] ? m->title : TR("Nothing playing", "재생 중인 곡 없음"));
     lv_label_set_text(v->artist, m->artist);
     if (v->album) {
         lv_label_set_text(v->album, m->album);
@@ -60,8 +60,9 @@ static void ble_cb(lv_observer_t *o, lv_subject_t *s)
     } else {
         lv_obj_remove_flag(v->hint, LV_OBJ_FLAG_HIDDEN);
         lv_label_set_text(v->hint, st == BLE_STATE_ADVERTISING
-                          ? LV_SYMBOL_BLUETOOTH "  Pair \"Smart Display\" in your phone's Bluetooth settings"
-                          : LV_SYMBOL_BLUETOOTH "  Bluetooth off");
+                          ? TR(LV_SYMBOL_BLUETOOTH "  Pair \"Smart Display\" in your phone's Bluetooth settings",
+                               LV_SYMBOL_BLUETOOTH "  휴대폰 블루투스 설정에서 \"Smart Display\"를 연결하세요")
+                          : TR(LV_SYMBOL_BLUETOOTH "  Bluetooth off", LV_SYMBOL_BLUETOOTH "  블루투스 꺼짐"));
     }
 }
 
@@ -113,7 +114,7 @@ void ui_music_create(lv_obj_t *parent, bool full)
     ui_free_user_data_on_delete(parent);
 
     if (!full) {
-        ui_card_title(parent, LV_SYMBOL_AUDIO, "Music");
+        ui_card_title(parent, LV_SYMBOL_AUDIO, TR("Music", "음악"));
     } else {
         lv_obj_set_flex_flow(parent, LV_FLEX_FLOW_COLUMN);
         lv_obj_set_flex_align(parent, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);

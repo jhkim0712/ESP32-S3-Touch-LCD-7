@@ -77,7 +77,8 @@ void ui_photo_create(lv_obj_t *parent)
     lv_obj_remove_flag(v->image, LV_OBJ_FLAG_CLICKABLE);
 
     v->placeholder = ui_label(parent, UI_FONT_M, UI_COLOR_DIM,
-                              LV_SYMBOL_IMAGE "  No photos\n\nPut JPG/PNG files in /photos on the SD card");
+                              TR(LV_SYMBOL_IMAGE "  No photos\n\nPut JPG/PNG files in /photos on the SD card",
+                                 LV_SYMBOL_IMAGE "  사진이 없습니다\n\nSD 카드의 photos 폴더에 JPG/PNG 파일을 넣어 주세요"));
     lv_obj_set_style_text_align(v->placeholder, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_center(v->placeholder);
 

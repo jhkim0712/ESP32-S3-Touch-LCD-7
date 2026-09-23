@@ -88,7 +88,9 @@ CONFIG_FATFS_API_ENCODING_UTF_8=y
 
 # ---------- LVGL 9.x ----------
 CONFIG_LV_COLOR_DEPTH_16=y
-CONFIG_LV_USE_CLIB_MALLOC=y
+# LVGL heap goes to PSRAM via components/ui/lv_mem_psram.c (clib malloc would put
+# every allocation < 4KB, e.g. glyph cache entries, into internal RAM)
+CONFIG_LV_USE_CUSTOM_MALLOC=y
 CONFIG_LV_USE_CLIB_STRING=y
 CONFIG_LV_USE_CLIB_SPRINTF=y
 CONFIG_LV_DEF_REFR_PERIOD=16
@@ -102,4 +104,7 @@ CONFIG_LV_USE_FS_STDIO=y
 CONFIG_LV_FS_STDIO_LETTER=83
 CONFIG_LV_USE_LODEPNG=y
 CONFIG_LV_USE_TINY_TTF=y
+# Korean UI font and weather icons are TTF files in LittleFS (/storage/fonts)
+CONFIG_LV_TINY_TTF_FILE_SUPPORT=y
+CONFIG_LV_TINY_TTF_CACHE_GLYPH_CNT=256
 CONFIG_LV_USE_SYSMON=n

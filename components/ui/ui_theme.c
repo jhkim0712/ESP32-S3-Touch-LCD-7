@@ -5,8 +5,71 @@
 #include <math.h>
 #include <string.h>
 
+#define FONT_KR_PATH        "S:" STORAGE_LFS_MOUNT_POINT "/fonts/NotoSansKR-subset.ttf"   // S: = LVGL stdio 드라이버
+#define FONT_WEATHER_PATH   "S:" STORAGE_LFS_MOUNT_POINT "/fonts/weather-icons.ttf"
+
 static lv_style_t s_card;
 static lv_style_t s_screen;
+
+const lv_font_t *ui_font_s = &lv_font_montserrat_14;
+const lv_font_t *ui_font_m = &lv_font_montserrat_20;
+const lv_font_t *ui_font_l = &lv_font_montserrat_28;
+const lv_font_t *ui_font_weather_l;
+const lv_font_t *ui_font_weather_s;
+
+static bool       s_korean_font;
+static app_lang_t s_lang = APP_LANG_EN;
+
+static const lv_font_t *load_ttf(const char *path, int32_t size, size_t cache, const lv_font_t *fallback)
+{
+    lv_font_t *f = lv_tiny_ttf_create_file_ex(path, size, LV_FONT_KERNING_NONE, cache);
+    if (f) {
+        f->fallback = fallback;
+    }
+    return f;
+}
+
+void ui_fonts_init(void)
+{
+    const lv_font_t *s = load_ttf(FONT_KR_PATH, 15, 256, &lv_font_montserrat_14);
+    const lv_font_t *m = s ? load_ttf(FONT_KR_PATH, 20, 384, &lv_font_montserrat_20) : NULL;
+    const lv_font_t *l = m ? load_ttf(FONT_KR_PATH, 28, 128, &lv_font_montserrat_28) : NULL;
+    if (s && m && l) {
+        ui_font_s = s;
+        ui_font_m = m;
+        ui_font_l = l;
+        s_korean_font = true;
+    } else {
+        LV_LOG_WARN("Korean font not found (%s) - UI stays in English", FONT_KR_PATH);
+    }
+    ui_font_weather_l = load_ttf(FONT_WEATHER_PATH, 88, 16, NULL);
+    ui_font_weather_s = load_ttf(FONT_WEATHER_PATH, 52, 16, NULL);
+}
+
+void ui_lang_set(app_lang_t lang)
+{
+    s_lang = lang;
+}
+
+app_lang_t ui_lang(void)
+{
+    return s_korean_font ? s_lang : APP_LANG_EN;
+}
+
+void ui_fmt_date(char *buf, size_t size, const struct tm *tm, bool long_form)
+{
+    if (ui_lang() == APP_LANG_KO) {
+        static const char *const wday[] = { "일", "월", "화", "수", "목", "금", "토" };
+        if (long_form) {
+            lv_snprintf(buf, size, "%d년 %d월 %d일 %s요일", tm->tm_year + 1900, tm->tm_mon + 1, tm->tm_mday,
+                        wday[tm->tm_wday]);
+        } else {
+            lv_snprintf(buf, size, "%d월 %d일 (%s)", tm->tm_mon + 1, tm->tm_mday, wday[tm->tm_wday]);
+        }
+        return;
+    }
+    strftime(buf, size, long_form ? "%A, %d %B %Y" : "%a %d %b", tm);
+}
 
 void ui_theme_init(lv_display_t *disp)
 {

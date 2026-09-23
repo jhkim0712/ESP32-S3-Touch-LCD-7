@@ -14,6 +14,7 @@
 #define KEY_PASS        "pass"
 #define KEY_UI_MODE     "ui_mode"
 #define KEY_ROTATION    "rotation"
+#define KEY_LANGUAGE    "lang"
 #define KEY_PHOTO_INT   "photo_int"
 #define KEY_SYMBOLS     "symbols"
 
@@ -26,6 +27,7 @@ static void set_defaults(app_settings_t *s)
     strlcpy(s->wifi_pass, CONFIG_APP_WIFI_PASSWORD, sizeof(s->wifi_pass));
     s->ui_mode = UI_MODE_WIDGET;
     s->rotation = UI_ROTATION_0;
+    s->language = APP_LANG_KO;
     s->photo_interval_s = CONFIG_APP_PHOTO_INTERVAL_SEC;
     strlcpy(s->stock_symbols, CONFIG_APP_STOCK_SYMBOLS, sizeof(s->stock_symbols));
 }
@@ -60,6 +62,9 @@ esp_err_t settings_load(app_settings_t *out)
     if (nvs_get_u8(h, KEY_ROTATION, &u8) == ESP_OK && u8 <= UI_ROTATION_270) {
         out->rotation = (ui_rotation_t)u8;
     }
+    if (nvs_get_u8(h, KEY_LANGUAGE, &u8) == ESP_OK && u8 <= APP_LANG_KO) {
+        out->language = (app_lang_t)u8;
+    }
     int32_t i32;
     if (nvs_get_i32(h, KEY_PHOTO_INT, &i32) == ESP_OK && i32 >= 3 && i32 <= 3600) {
         out->photo_interval_s = i32;
@@ -79,11 +84,13 @@ esp_err_t settings_save(const app_settings_t *in)
     if (err == ESP_OK) err = nvs_set_str(h, KEY_SYMBOLS, in->stock_symbols);
     if (err == ESP_OK) err = nvs_set_u8(h, KEY_UI_MODE, (uint8_t)in->ui_mode);
     if (err == ESP_OK) err = nvs_set_u8(h, KEY_ROTATION, (uint8_t)in->rotation);
+    if (err == ESP_OK) err = nvs_set_u8(h, KEY_LANGUAGE, (uint8_t)in->language);
     if (err == ESP_OK) err = nvs_set_i32(h, KEY_PHOTO_INT, in->photo_interval_s);
     if (err == ESP_OK) err = nvs_commit(h);
     nvs_close(h);
 
     ESP_RETURN_ON_ERROR(err, TAG, "save");
-    ESP_LOGI(TAG, "saved (ui_mode=%d rotation=%d photo=%ds)", in->ui_mode, in->rotation, in->photo_interval_s);
+    ESP_LOGI(TAG, "saved (ui_mode=%d rotation=%d lang=%d photo=%ds)", in->ui_mode, in->rotation,
+             in->language, in->photo_interval_s);
     return ESP_OK;
 }

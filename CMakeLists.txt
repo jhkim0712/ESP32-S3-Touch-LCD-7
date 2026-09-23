@@ -8,3 +8,7 @@ cmake_minimum_required(VERSION 3.16)
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(smart_display)
+
+# LittleFS image of assets/ (fonts, icons) is built and flashed together with
+# the app by `idf.py flash`. It overwrites the "storage" partition.
+littlefs_create_partition_image(storage assets FLASH_IN_PROJECT)

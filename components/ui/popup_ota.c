@@ -34,7 +34,7 @@ static void on_update(lv_event_t *e)
     s_bar = lv_bar_create(content);
     lv_obj_set_size(s_bar, LV_PCT(100), 14);
     lv_bar_set_range(s_bar, 0, 100);
-    s_status = ui_label(content, UI_FONT_S, UI_COLOR_DIM, "Downloading...");
+    s_status = ui_label(content, UI_FONT_S, UI_COLOR_DIM, TR("Downloading...", "다운로드 중..."));
     app_event_post(APP_EVT_REQ_OTA_START, NULL, 0);
 }
 
@@ -47,18 +47,19 @@ void ui_ota_popup_show(const ota_release_t *rel)
     lv_obj_set_width(s_mbox, ui_is_portrait() ? LV_PCT(90) : 560);
     lv_obj_add_event_cb(s_mbox, on_deleted, LV_EVENT_DELETE, NULL);
 
-    lv_msgbox_add_title(s_mbox, LV_SYMBOL_DOWNLOAD "  Firmware update available");
+    lv_msgbox_add_title(s_mbox, TR(LV_SYMBOL_DOWNLOAD "  Firmware update available",
+                                   LV_SYMBOL_DOWNLOAD "  새 펌웨어가 있습니다"));
     lv_msgbox_add_text_fmt(s_mbox, "v%s  " LV_SYMBOL_RIGHT "  %s\n\n%s",
                            esp_app_get_description()->version, rel->tag, rel->notes);
-    lv_obj_add_event_cb(lv_msgbox_add_footer_button(s_mbox, "Later"), on_close, LV_EVENT_CLICKED, NULL);
-    lv_obj_add_event_cb(lv_msgbox_add_footer_button(s_mbox, "Update"), on_update, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(lv_msgbox_add_footer_button(s_mbox, TR("Later", "나중에")), on_close, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(lv_msgbox_add_footer_button(s_mbox, TR("Update", "업데이트")), on_update, LV_EVENT_CLICKED, NULL);
 }
 
 void ui_ota_popup_progress(int percent)
 {
     if (s_bar) {
         lv_bar_set_value(s_bar, percent, LV_ANIM_ON);
-        lv_label_set_text_fmt(s_status, "Downloading... %d%%", percent);
+        lv_label_set_text_fmt(s_status, TR("Downloading... %d%%", "다운로드 중... %d%%"), percent);
     }
 }
 
@@ -68,14 +69,16 @@ void ui_ota_popup_done(esp_err_t result)
         return;
     }
     if (result == ESP_OK) {
-        lv_label_set_text(s_status, LV_SYMBOL_OK "  Update installed. Restarting...");
+        lv_label_set_text(s_status, TR(LV_SYMBOL_OK "  Update installed. Restarting...",
+                                       LV_SYMBOL_OK "  설치 완료. 다시 시작합니다..."));
         return;
     }
-    lv_label_set_text_fmt(s_status, LV_SYMBOL_WARNING "  Update failed: %s", esp_err_to_name(result));
+    lv_label_set_text_fmt(s_status, TR(LV_SYMBOL_WARNING "  Update failed: %s", LV_SYMBOL_WARNING "  업데이트 실패: %s"),
+                          esp_err_to_name(result));
     lv_obj_t *footer = lv_msgbox_get_footer(s_mbox);
     if (footer) {
         lv_obj_clean(footer);
         lv_obj_remove_flag(footer, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_event_cb(lv_msgbox_add_footer_button(s_mbox, "Close"), on_close, LV_EVENT_CLICKED, NULL);
+        lv_obj_add_event_cb(lv_msgbox_add_footer_button(s_mbox, TR("Close", "닫기")), on_close, LV_EVENT_CLICKED, NULL);
     }
 }

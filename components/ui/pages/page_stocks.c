@@ -66,7 +66,7 @@ static void stocks_cb(lv_observer_t *o, lv_subject_t *s)
         add_row(v->list, &list->items[i], v->full);
     }
     if (list->count == 0) {
-        ui_label(v->list, UI_FONT_M, UI_COLOR_DIM, "No data yet");
+        ui_label(v->list, UI_FONT_M, UI_COLOR_DIM, TR("No data yet", "아직 데이터 없음"));
     }
 
     if (v->updated) {
@@ -74,7 +74,8 @@ static void stocks_cb(lv_observer_t *o, lv_subject_t *s)
             struct tm tm;
             localtime_r(&list->updated_at, &tm);
             char buf[32];
-            strftime(buf, sizeof(buf), "Updated %H:%M:%S", &tm);
+            lv_snprintf(buf, sizeof(buf), TR("Updated %02d:%02d:%02d", "%02d:%02d:%02d 갱신"),
+                        tm.tm_hour, tm.tm_min, tm.tm_sec);
             lv_label_set_text(v->updated, buf);
         } else {
             lv_label_set_text(v->updated, "");
@@ -90,7 +91,7 @@ void ui_stocks_create(lv_obj_t *parent, bool full)
     lv_obj_set_user_data(parent, v);
     ui_free_user_data_on_delete(parent);
 
-    ui_card_title(parent, LV_SYMBOL_SHUFFLE, "Stocks");
+    ui_card_title(parent, LV_SYMBOL_SHUFFLE, TR("Stocks", "주식"));
 
     v->list = lv_obj_create(parent);
     lv_obj_remove_style_all(v->list);

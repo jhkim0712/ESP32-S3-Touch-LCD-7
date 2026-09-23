@@ -32,12 +32,12 @@ static void time_cb(lv_observer_t *o, lv_subject_t *s)
     struct tm tm;
     localtime_r(&now, &tm);
     if (tm.tm_year + 1900 < 2025) {
-        lv_label_set_text(label, "Waiting for time sync");
+        lv_label_set_text(label, TR("Waiting for time sync", "시간 동기화 대기 중"));
         return;
     }
-    char buf[40];
-    strftime(buf, sizeof(buf), "%a %d %b  %H:%M", &tm);
-    lv_label_set_text(label, buf);
+    char date[40];
+    ui_fmt_date(date, sizeof(date), &tm, false);
+    lv_label_set_text_fmt(label, "%s  %02d:%02d", date, tm.tm_hour, tm.tm_min);
 }
 
 static void on_mode_click(lv_event_t *e)
@@ -97,6 +97,6 @@ void ui_status_bar_create(void)
 void ui_status_bar_set_mode(ui_mode_t mode)
 {
     // 버튼에는 "전환될" 모드를 표시한다
-    lv_label_set_text(s_mode_label, mode == UI_MODE_WIDGET ? LV_SYMBOL_RIGHT "  Slides"
-                                                           : LV_SYMBOL_LIST "  Widgets");
+    lv_label_set_text(s_mode_label, mode == UI_MODE_WIDGET ? TR(LV_SYMBOL_RIGHT "  Slides", LV_SYMBOL_RIGHT "  슬라이드")
+                                                           : TR(LV_SYMBOL_LIST "  Widgets", LV_SYMBOL_LIST "  위젯"));
 }

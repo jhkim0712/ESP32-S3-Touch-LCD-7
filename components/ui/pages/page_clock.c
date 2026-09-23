@@ -39,11 +39,11 @@ static void date_label_cb(lv_observer_t *o, lv_subject_t *s)
     struct tm tm;
     lv_obj_t *label = lv_observer_get_target_obj(o);
     if (!local_time(lv_subject_get_int(s), &tm)) {
-        lv_label_set_text(label, "Waiting for NTP sync");
+        lv_label_set_text(label, TR("Waiting for NTP sync", "인터넷 시간 동기화 대기 중"));
         return;
     }
     char buf[48];
-    strftime(buf, sizeof(buf), "%A, %d %B %Y", &tm);
+    ui_fmt_date(buf, sizeof(buf), &tm, true);
     lv_label_set_text(label, buf);
 }
 
@@ -122,7 +122,7 @@ static void analog_create(lv_obj_t *parent, int32_t size)
 void ui_clock_create(lv_obj_t *parent, bool full)
 {
     if (!full) {
-        ui_card_title(parent, LV_SYMBOL_BELL, "Clock  (KST)");
+        ui_card_title(parent, LV_SYMBOL_BELL, TR("Clock  (KST)", "시계  (한국 표준시)"));
         lv_obj_set_flex_align(parent, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
         lv_obj_t *t = ui_label(parent, UI_FONT_XL, UI_COLOR_TEXT, "");
         lv_obj_set_style_pad_top(t, 12, 0);
@@ -152,5 +152,5 @@ void ui_clock_create(lv_obj_t *parent, bool full)
     lv_subject_add_observer_obj(&ui_subj_time, time_label_cb, t, (void *)(intptr_t)true);
     lv_obj_t *d = ui_label(col, UI_FONT_M, UI_COLOR_DIM, "");
     lv_subject_add_observer_obj(&ui_subj_time, date_label_cb, d, NULL);
-    ui_label(col, UI_FONT_S, UI_COLOR_DIM, "KST (UTC+9)");
+    ui_label(col, UI_FONT_S, UI_COLOR_DIM, TR("KST (UTC+9)", "한국 표준시 (UTC+9)"));
 }

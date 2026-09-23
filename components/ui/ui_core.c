@@ -165,9 +165,10 @@ static lv_display_rotation_t to_lv_rotation(ui_rotation_t r)
     }
 }
 
-esp_err_t ui_init(const board_handles_t *hw, ui_mode_t initial_mode, ui_rotation_t rotation)
+esp_err_t ui_init(const board_handles_t *hw, const app_settings_t *settings)
 {
-    ESP_RETURN_ON_FALSE(hw && hw->lcd_panel && hw->touch, ESP_ERR_INVALID_ARG, TAG, "hw");
+    ESP_RETURN_ON_FALSE(hw && hw->lcd_panel && hw->touch && settings, ESP_ERR_INVALID_ARG, TAG, "hw");
+    ui_rotation_t rotation = settings->rotation;
 
     lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
     port_cfg.task_priority = 4;
@@ -211,11 +212,13 @@ esp_err_t ui_init(const board_handles_t *hw, ui_mode_t initial_mode, ui_rotation
     ESP_RETURN_ON_FALSE(lvgl_port_lock(0), ESP_FAIL, TAG, "lock");
     // esp_lvgl_port 가 패널 swap/mirror 를 설정하고, LVGL 이 해상도와 터치 좌표를 함께 회전한다.
     lv_display_set_rotation(s_disp, to_lv_rotation(rotation));
+    ui_fonts_init();
+    ui_lang_set(settings->language);
     ui_theme_init(s_disp);
     subjects_init();
     ui_status_bar_create();
 
-    s_mode = initial_mode;
+    s_mode = settings->ui_mode;
     lv_obj_t *old = lv_screen_active();
     lv_screen_load(build_screen(s_mode));
     lv_obj_delete(old);
@@ -231,8 +234,9 @@ esp_err_t ui_init(const board_handles_t *hw, ui_mode_t initial_mode, ui_rotation
     vTaskDelay(pdMS_TO_TICKS(100));
     board_backlight_set(true);
 
-    ESP_LOGI(TAG, "LVGL %d.%d.%d ready, %s mode, rotation %d deg", LVGL_VERSION_MAJOR, LVGL_VERSION_MINOR,
-             LVGL_VERSION_PATCH, s_mode == UI_MODE_SLIDE ? "slide" : "widget", rotation * 90);
+    ESP_LOGI(TAG, "LVGL %d.%d.%d ready, %s mode, rotation %d deg, language %s", LVGL_VERSION_MAJOR,
+             LVGL_VERSION_MINOR, LVGL_VERSION_PATCH, s_mode == UI_MODE_SLIDE ? "slide" : "widget", rotation * 90,
+             ui_lang() == APP_LANG_KO ? "ko" : "en");
     return ESP_OK;
 }
 
@@ -256,6 +260,18 @@ void ui_set_mode(ui_mode_t mode)
     if (changed) {
         app_event_post(APP_EVT_UI_MODE_CHANGED, &mode, sizeof(mode));
     }
+    lvgl_port_unlock();
+}
+
+void ui_set_language(app_lang_t lang)
+{
+    if (!lvgl_port_lock(0)) {
+        return;
+    }
+    ui_lang_set(lang);
+    ui_show_home(LV_SCREEN_LOAD_ANIM_FADE_IN);       // 화면을 새 언어로 다시 만든다
+    ui_status_bar_set_mode(s_mode);
+    lv_subject_notify(&ui_subj_time);                 // 상태 표시줄 날짜 갱신
     lvgl_port_unlock();
 }
 

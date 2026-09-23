@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <time.h>
 #include "lvgl.h"
 #include "esp_err.h"
 #include "app_storage.h"
@@ -11,10 +12,24 @@
 #define UI_STATUS_BAR_H     48
 #define UI_GAP              12
 
-#define UI_FONT_S           (&lv_font_montserrat_14)
-#define UI_FONT_M           (&lv_font_montserrat_20)
-#define UI_FONT_L           (&lv_font_montserrat_28)
+// 본문 글꼴: 한글 TTF(Tiny TTF, /storage/fonts) → 없으면 Montserrat. LV_SYMBOL_* 기호는
+// 한글 폰트의 fallback 으로 연결한 Montserrat 에서 그린다.
+// XL(48px)은 시계/기온 숫자에만 쓰므로 Montserrat 그대로 사용.
+extern const lv_font_t *ui_font_s, *ui_font_m, *ui_font_l;
+#define UI_FONT_S           (ui_font_s)
+#define UI_FONT_M           (ui_font_m)
+#define UI_FONT_L           (ui_font_l)
 #define UI_FONT_XL          (&lv_font_montserrat_48)
+
+// 날씨 아이콘 폰트 (Weather Icons TTF). 파일이 없으면 NULL → 색 원으로 대신 표시
+extern const lv_font_t *ui_font_weather_l, *ui_font_weather_s;
+
+// ---- 언어 ----
+app_lang_t ui_lang(void);       // 한글 폰트가 없으면 항상 APP_LANG_EN
+#define TR(en, ko)          (ui_lang() == APP_LANG_KO ? (ko) : (en))
+// 날짜: long_form = "2026년 9월 23일 수요일" / "Wednesday, 23 September 2026"
+//       short     = "9월 23일 (수)"          / "Wed 23 Sep"
+void ui_fmt_date(char *buf, size_t size, const struct tm *tm, bool long_form);
 
 #define UI_COLOR_BG         lv_color_hex(0x0E1116)
 #define UI_COLOR_CARD       lv_color_hex(0x1A1F27)
@@ -38,7 +53,9 @@ extern lv_subject_t ui_subj_wifi_scan;  // int: 스캔 완료 카운터 → app_
 extern lv_subject_t ui_subj_ble;        // int: ble_state_t
 
 // ---- theme / 공통 ----
+void      ui_fonts_init(void);                          // 한글/아이콘 TTF 로드 (LVGL lock 안에서)
 void      ui_theme_init(lv_display_t *disp);
+void      ui_lang_set(app_lang_t lang);
 lv_obj_t *ui_screen_create(void);                       // 상태 표시줄 아래 영역을 쓰는 빈 화면
 lv_obj_t *ui_card_create(lv_obj_t *parent);
 lv_obj_t *ui_card_title(lv_obj_t *card, const char *symbol, const char *text);

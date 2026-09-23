@@ -61,7 +61,7 @@ extern "C" void app_main(void)
     board_config_t board_cfg = BOARD_CONFIG_DEFAULT();
     board_cfg.lcd_num_fbs = ui_board_num_fbs(settings.rotation);
     ESP_ERROR_CHECK(board_init(&board_cfg, &hw));
-    ESP_ERROR_CHECK(ui_init(&hw, settings.ui_mode, settings.rotation));
+    ESP_ERROR_CHECK(ui_init(&hw, &settings));
 
     ESP_ERROR_CHECK(esp_event_handler_register(APP_EVENT, APP_EVT_UI_MODE_CHANGED, on_ui_mode_changed, NULL));
 
