@@ -14,11 +14,18 @@
 | UI | 위젯형(카드 그리드)과 슬라이드형(좌우 스와이프) 두 모드 전환 |
 
 ## 개발 환경
-- ESP-IDF **v5.4 이상** (v5.5.1에서 확인 중)
-- LVGL 9.2 + esp_lvgl_port
+- ESP-IDF **v6.1 이상**
+- LVGL 9.x (현재 9.5) + esp_lvgl_port
 - 대상 칩: ESP32-S3 (8MB Flash / 8MB Octal PSRAM)
 
+> **보류:** 블루투스 스피커로 SD 카드 MP3나 팟캐스트(RSS)를 재생하는 기능은 이번 범위에서 뺐습니다. ESP32-S3는 Bluetooth Classic(A2DP)을 지원하지 않아 외부 송신 하드웨어가 필요하기 때문입니다. 자세한 내용은 [docs/01-environment.md](docs/01-environment.md#14-요구사항-검토-결과)에 있습니다.
+
 ## 빌드 및 플래시
+ESP-IDF를 EIM(ESP-IDF Installation Manager)으로 설치했다면 먼저 환경을 불러옵니다.
+```powershell
+. C:\Espressif\tools\Microsoft.v6.1.PowerShell_profile.ps1
+```
+
 ```powershell
 idf.py set-target esp32s3
 idf.py menuconfig        # "Smart Display Configuration" 메뉴에서 Wi-Fi, 좌표, 종목 등 입력

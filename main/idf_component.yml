@@ -5,4 +5,4 @@
 ##   storage : littlefs
 ## Resolved versions are pinned in dependencies.lock (commit it).
 dependencies:
-  idf: ">=5.3.0"
+  idf: ">=6.1.0"

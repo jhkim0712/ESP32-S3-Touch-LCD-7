@@ -1,6 +1,6 @@
 # 1단계 — 개발 환경 세팅 및 라이브러리 구성
 
-## 1.1 프레임워크 선택: **ESP-IDF v5.4.x** (v5.3 이상)
+## 1.1 프레임워크 선택: **ESP-IDF v6.1**
 
 | 판단 기준 | ESP-IDF | Arduino-ESP32 v3.x |
 |---|---|---|
@@ -16,10 +16,11 @@
 > Arduino 라이브러리를 꼭 써야 하면 `espressif/arduino-esp32` 를 IDF 컴포넌트로 추가하는 방법(Arduino as component)이 있습니다. 다만 이 프로젝트에 필요한 기능은 모두 IDF 네이티브 API로 대체할 수 있어 추가하지 않았습니다.
 
 ### 설치 (Windows)
-1. [ESP-IDF Windows Installer](https://dl.espressif.com/dl/esp-idf/)에서 **v5.4.x** 오프라인 설치
-2. VS Code 사용 시 확장 **"ESP-IDF" (Espressif)** 설치 후 기존 IDF 경로 지정
-3. ESP-IDF PowerShell에서:
+1. **ESP-IDF Installation Manager(EIM)** 로 **v6.1** 설치 (기본 경로: `C:\esp\v6.1\esp-idf`, 도구: `C:\Espressif\tools`)
+2. VS Code 사용 시 확장 **"ESP-IDF" (Espressif)** 설치 후 v6.1 경로 지정
+3. PowerShell에서 (EIM 설치는 `export.ps1`이 도구를 찾지 못하므로 EIM이 만든 프로필 스크립트를 사용):
    ```powershell
+   . C:\Espressif\tools\Microsoft.v6.1.PowerShell_profile.ps1
    cd E:\Projects\ESP32-S3-Touch-LCD-7
    idf.py set-target esp32s3      # sdkconfig.defaults 적용
    idf.py menuconfig              # "Smart Display Configuration" 에서 Wi-Fi 등 입력
@@ -88,12 +89,12 @@ GPIO19/20 (USB), GPIO43/44 (UART0/RS485). GPIO0/45/46 은 LCD 데이터로 쓰�
 
 | 용도 | 요구사항 예시 | 채택 | 출처 |
 |---|---|---|---|
-| GUI | LVGL | **lvgl/lvgl ~9.2** | Component Registry |
+| GUI | LVGL | **lvgl/lvgl ^9.3** (현재 9.5, esp_lvgl_port 2.9가 IDF 6에서 9.3 이상 필요) | Component Registry |
 | LVGL 포팅 | — | **espressif/esp_lvgl_port ^2.4** (태스크, lock, RGB bounce buffer, tearing 방지) | Registry |
 | 터치 | — | **espressif/esp_lcd_touch_gt911** | Registry |
 | RGB LCD | — | `esp_lcd` (`esp_lcd_new_rgb_panel`) | IDF 내장 |
 | IO 확장기 | — | 자체 CH422G 드라이버 (약 40줄, `i2c_master`) | 직접 작성 |
-| JSON | ArduinoJson | **cJSON** (`json` 컴포넌트) | IDF 내장 |
+| JSON | ArduinoJson | **espressif/cjson** (IDF 6부터 본체에서 분리) | Registry |
 | Wi-Fi 설정 | WiFiManager | `esp_wifi` + **화면 키보드 설정 페이지** + NVS 저장 | IDF 내장 |
 | HTTPS | HTTPClient | `esp_http_client` + `esp_crt_bundle` | IDF 내장 |
 | NTP | configTime | `esp_netif_sntp` + `TZ=KST-9` | IDF 내장 |
@@ -113,6 +114,7 @@ GPIO19/20 (USB), GPIO43/44 (UART0/RS485). GPIO0/45/46 은 LCD 데이터로 쓰�
    - **iOS:** Apple Media Service(AMS)로 곡명·아티스트·재생 상태를 받고 재생/일시정지/이전/다음을 제어합니다. 별도 앱은 필요 없습니다.
    - **Android:** BLE HID Consumer Control(미디어 키)로 제어합니다. **곡 정보는 표준 BLE 서비스가 없어** companion 앱(예: MediaSession을 읽어 커스텀 GATT로 전송)이 있어야 표시할 수 있습니다.
    - 이 보드에는 오디오 코덱/스피커가 없으므로 "음악 플레이어"는 **스마트폰 리모컨**입니다.
+   - **보류 — 블루투스 스피커 재생 (SD `mp3/` 폴더, 팟캐스트 RSS):** 블루투스 스피커는 Classic A2DP로 연결되는데 ESP32-S3는 이를 지원하지 않습니다. LE Audio도 BLE 5.2가 필요해 쓸 수 없습니다. 재생하려면 S3가 MP3/AAC를 디코딩하고, 소리는 외부 하드웨어로 내보내야 합니다. 후보는 USB 블루투스 오디오 송신 동글(USB 호스트), Classic BT를 지원하는 보조 ESP32(UART 연결), I2S DAC + 아날로그 송신기입니다. 하드웨어를 정한 뒤 다시 검토합니다.
 2. **주가 "실시간".** Yahoo v8 chart API는 비공식이고 키가 필요 없지만 언제든 막힐 수 있습니다(`User-Agent` 헤더 필요). Alpha Vantage 무료 플랜은 **하루 25회**로, 4개 종목이면 약 4시간에 1회만 갱신할 수 있습니다. 그래서 **Yahoo(60초 폴링)를 기본으로** 하고 provider 인터페이스로 교체할 수 있게 설계했습니다. KOSPI = `^KS11`.
 3. **날씨.** **Open-Meteo**(API 키 없음, 무료, WMO 날씨 코드)를 기본으로 했습니다. OpenWeatherMap은 키 관리가 필요해 선택 사항으로 둡니다.
 4. **한글 표시.** LVGL 기본 폰트(Montserrat)에는 한글이 없습니다. 곡 제목 등 한글을 표시하려면 한글 폰트가 필수입니다. Tiny TTF + 서브셋 TTF(약 1~2MB, LittleFS)로 PSRAM에서 렌더링할 계획입니다.
