@@ -66,6 +66,9 @@ CONFIG_ESP_HTTP_CLIENT_ENABLE_HTTPS=y
 # ---------- Web settings (HTTP server + mDNS smart-display.local) ----------
 # mDNS only answers queries and does no flash writes, so its task stack and
 # packet buffers can live in PSRAM. Browse/console/AP/ETH are not used.
+# Photo manager URLs carry a sub-folder path + file name (URL-encoded Korean
+# names are 3x longer than the bytes).
+CONFIG_HTTPD_MAX_URI_LEN=1024
 CONFIG_MDNS_TASK_CREATE_FROM_SPIRAM=y
 CONFIG_MDNS_MEMORY_ALLOC_SPIRAM=y
 CONFIG_MDNS_ENABLE_CONSOLE_CLI=n

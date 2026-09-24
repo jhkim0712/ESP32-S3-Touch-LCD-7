@@ -38,6 +38,20 @@ menu "Smart Display Configuration"
         config APP_WEATHER_CITY
             string "City label"
             default "Seoul"
+            help
+                Shown in the weather card when Open-Meteo is used.
+        config APP_OWM_API_KEY
+            string "OpenWeatherMap API key (empty = Open-Meteo)"
+            default ""
+            help
+                Default only - it can be changed in the device settings page or
+                the web settings page. Get a free key at openweathermap.org.
+        config APP_OWM_CITY
+            string "OpenWeatherMap city (ID or name)"
+            default ""
+            help
+                City ID (e.g. 1835848 = Seoul) or "name,country" (e.g. Seoul,KR).
+                Empty: use the latitude/longitude above.
         config APP_WEATHER_REFRESH_MIN
             int "Refresh interval (minutes)"
             range 5 180
@@ -93,13 +107,13 @@ menu "Smart Display Configuration"
             int "Slideshow interval (seconds)"
             range 3 3600
             default 10
-        config APP_FLICKR_SYNC_MIN
-            int "Flickr feed sync interval (minutes)"
+        config APP_FEED_SYNC_MIN
+            int "Photo feed (RSS) sync interval (minutes)"
             range 10 1440
             default 60
             help
                 Feeds are added in the web settings page (Photos tab). Images are
-                mirrored to <photo dir>/flickr/<feed hash>/ on the SD card.
+                mirrored to <photo dir>/feeds/<feed hash>/ on the SD card.
     endmenu
 
     menu "OTA (GitHub Releases)"

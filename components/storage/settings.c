@@ -5,6 +5,7 @@
 #include "app_storage.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "esp_check.h"
 #include "esp_random.h"
@@ -19,8 +20,11 @@
 #define KEY_LANGUAGE    "lang"
 #define KEY_PHOTO_INT   "photo_int"
 #define KEY_SYMBOLS     "symbols"
+#define KEY_OWM_KEY     "owm_key"
+#define KEY_W_CITY      "w_city"
 #define KEY_WEB_PIN     "web_pin"
-#define KEY_FLICKR      "flickr"
+#define KEY_FEEDS       "feeds"
+#define KEY_FEEDS_OLD   "flickr"    // v0.2.2 까지의 키 → 처음 읽을 때 KEY_FEEDS 로 옮김
 
 static const char *TAG = "settings";
 
@@ -34,6 +38,8 @@ static void set_defaults(app_settings_t *s)
     s->language = APP_LANG_KO;
     s->photo_interval_s = CONFIG_APP_PHOTO_INTERVAL_SEC;
     strlcpy(s->stock_symbols, CONFIG_APP_STOCK_SYMBOLS, sizeof(s->stock_symbols));
+    strlcpy(s->owm_api_key, CONFIG_APP_OWM_API_KEY, sizeof(s->owm_api_key));
+    strlcpy(s->weather_city, CONFIG_APP_OWM_CITY, sizeof(s->weather_city));
 }
 
 static void get_str(nvs_handle_t h, const char *key, char *out, size_t size)
@@ -58,6 +64,8 @@ esp_err_t settings_load(app_settings_t *out)
     get_str(h, KEY_SSID, out->wifi_ssid, sizeof(out->wifi_ssid));
     get_str(h, KEY_PASS, out->wifi_pass, sizeof(out->wifi_pass));
     get_str(h, KEY_SYMBOLS, out->stock_symbols, sizeof(out->stock_symbols));
+    get_str(h, KEY_OWM_KEY, out->owm_api_key, sizeof(out->owm_api_key));
+    get_str(h, KEY_W_CITY, out->weather_city, sizeof(out->weather_city));
 
     uint8_t u8;
     if (nvs_get_u8(h, KEY_UI_MODE, &u8) == ESP_OK && u8 <= UI_MODE_SLIDE) {
@@ -86,6 +94,8 @@ esp_err_t settings_save(const app_settings_t *in)
     if (err == ESP_OK) err = nvs_set_str(h, KEY_SSID, in->wifi_ssid);
     if (err == ESP_OK) err = nvs_set_str(h, KEY_PASS, in->wifi_pass);
     if (err == ESP_OK) err = nvs_set_str(h, KEY_SYMBOLS, in->stock_symbols);
+    if (err == ESP_OK) err = nvs_set_str(h, KEY_OWM_KEY, in->owm_api_key);
+    if (err == ESP_OK) err = nvs_set_str(h, KEY_W_CITY, in->weather_city);
     if (err == ESP_OK) err = nvs_set_u8(h, KEY_UI_MODE, (uint8_t)in->ui_mode);
     if (err == ESP_OK) err = nvs_set_u8(h, KEY_ROTATION, (uint8_t)in->rotation);
     if (err == ESP_OK) err = nvs_set_u8(h, KEY_LANGUAGE, (uint8_t)in->language);
@@ -99,8 +109,36 @@ esp_err_t settings_save(const app_settings_t *in)
     return ESP_OK;
 }
 
-esp_err_t settings_get_flickr_feeds(char *out, size_t size)
+// 예전 키("flickr")에 저장된 목록을 새 키로 옮긴다 (OTA 후 처음 한 번)
+static void migrate_feeds_key(void)
 {
+    static bool s_done;
+    if (s_done) {
+        return;
+    }
+    s_done = true;
+    nvs_handle_t h;
+    if (nvs_open(NS, NVS_READWRITE, &h) != ESP_OK) {
+        return;
+    }
+    size_t len = 0;
+    if (nvs_get_str(h, KEY_FEEDS, NULL, &len) == ESP_ERR_NVS_NOT_FOUND &&
+        nvs_get_str(h, KEY_FEEDS_OLD, NULL, &len) == ESP_OK) {
+        char *buf = malloc(len);
+        if (buf && nvs_get_str(h, KEY_FEEDS_OLD, buf, &len) == ESP_OK &&
+            nvs_set_str(h, KEY_FEEDS, buf) == ESP_OK) {
+            nvs_erase_key(h, KEY_FEEDS_OLD);
+            nvs_commit(h);
+            ESP_LOGI(TAG, "photo feed list moved to key \"%s\"", KEY_FEEDS);
+        }
+        free(buf);
+    }
+    nvs_close(h);
+}
+
+esp_err_t settings_get_photo_feeds(char *out, size_t size)
+{
+    migrate_feeds_key();
     out[0] = '\0';
     nvs_handle_t h;
     esp_err_t err = nvs_open(NS, NVS_READONLY, &h);
@@ -109,7 +147,7 @@ esp_err_t settings_get_flickr_feeds(char *out, size_t size)
     }
     ESP_RETURN_ON_ERROR(err, TAG, "open");
     size_t len = size;
-    err = nvs_get_str(h, KEY_FLICKR, out, &len);
+    err = nvs_get_str(h, KEY_FEEDS, out, &len);
     nvs_close(h);
     if (err != ESP_OK) {
         out[0] = '\0';
@@ -117,11 +155,11 @@ esp_err_t settings_get_flickr_feeds(char *out, size_t size)
     return err == ESP_OK || err == ESP_ERR_NVS_NOT_FOUND ? ESP_OK : err;
 }
 
-esp_err_t settings_set_flickr_feeds(const char *feeds)
+esp_err_t settings_set_photo_feeds(const char *feeds)
 {
     nvs_handle_t h;
     ESP_RETURN_ON_ERROR(nvs_open(NS, NVS_READWRITE, &h), TAG, "open");
-    esp_err_t err = nvs_set_str(h, KEY_FLICKR, feeds);
+    esp_err_t err = nvs_set_str(h, KEY_FEEDS, feeds);
     if (err == ESP_OK) err = nvs_commit(h);
     nvs_close(h);
     return err;

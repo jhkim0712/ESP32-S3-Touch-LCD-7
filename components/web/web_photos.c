@@ -1,11 +1,11 @@
 // 전자앨범 사진 관리 API (SD 카드의 CONFIG_APP_PHOTO_DIR)
-//   앨범 = 사진 폴더 바로 아래의 폴더 ("" = 사진 폴더 자체). 더 깊은 하위 폴더는 전자앨범에는 나오지만 웹에서는 보이지 않는다.
-//   GET  /api/photos                                   {sd, albums:[{name, count}]}
-//   GET  /api/photos/list?album=                       {photos:[name, ...]}
+//   album = 사진 폴더 기준 상대 경로 ("" = 사진 폴더 자체, "a/b" = 하위 폴더). 전자앨범처럼 4단계까지.
+//   GET  /api/photos                                   {sd, albums:[{name, count}]}  (맨 위 폴더만)
+//   GET  /api/photos/list?album=                       {readonly, dirs:[{name, count}], photos:[name, ...]}
 //   GET  /api/photos/file?album=&name=[&thumb=1]       이미지 (썸네일이 없으면 원본). <img> 용으로 ?pin= 도 허용
 //   POST /api/photos/upload?album=&name=[&thumb=1]     본문 = JPEG. 같은 이름이 있으면 "이름-1.jpg" 로 바꿔 저장 → {name}
 //   POST /api/photos/delete?album=&name=               사진 + 썸네일 삭제, 앨범이 비면 폴더도 삭제
-// flickr 폴더는 app_flickr 의 미러라 앨범 목록에서 빼고 요청도 거부한다 (웹 페이지의 Flickr 카드에서 관리).
+// 사진 피드 폴더(PHOTO_FEED_DIR_NAME)와 그 아래는 photo_feed 의 미러라 보기만 한다: 올리기/지우기는 거부 (다음 동기화 때 되돌아가므로).
 // 썸네일은 <앨범>/.thumbs/<이름> 에 둔다 (전자앨범은 '.' 로 시작하는 폴더를 건너뛴다).
 // 받는 중인 파일은 "<이름>.part" 로 쓰고 끝나면 이름을 바꾸므로, 전자앨범이 반쯤 받은 파일을 읽지 않는다.
 // 업로드/삭제 후 3초 동안 더 바뀌지 않으면 APP_EVT_REQ_PHOTO_RESCAN 을 보낸다 (여러 장 올려도 한 번만 다시 읽음).
@@ -23,16 +23,21 @@
 #include "app_state.h"
 #include "board.h"
 #include "esp_check.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "photo_feed.h"
 #include "sdkconfig.h"
 
 #define PHOTO_DIR           CONFIG_APP_PHOTO_DIR
 #define THUMB_DIR           ".thumbs"
 #define NAME_MAX_BYTES      80                      // UTF-8 바이트 (FAT 긴 이름 255자 안쪽)
 #define QUERY_BUF_LEN       (NAME_MAX_BYTES * 3 + 1)  // URL 인코딩된 값도 담을 수 있게
-// 경로 버퍼: 확인 전의 쿼리 값(QUERY_BUF_LEN)이 들어가도 잘리지 않는 크기 (snprintf 경고 방지)
-#define PATH_LEN            (sizeof(PHOTO_DIR) + 2 * QUERY_BUF_LEN + sizeof(THUMB_DIR) + 8)
+#define ALBUM_MAX_BYTES     200                     // 하위 폴더 경로 전체 (UTF-8)
+#define ALBUM_MAX_DEPTH     4                       // photo_loader 의 MAX_DEPTH 와 같게
+#define ALBUM_BUF_LEN       (ALBUM_MAX_BYTES * 3 + 1)
+// 경로 버퍼: 확인 전의 쿼리 값이 들어가도 잘리지 않는 크기 (snprintf 경고 방지)
+#define PATH_LEN            (sizeof(PHOTO_DIR) + ALBUM_BUF_LEN + QUERY_BUF_LEN + sizeof(THUMB_DIR) + 8)
 #define UPLOAD_MAX_LEN      (10 * 1024 * 1024)
 #define IO_CHUNK            (8 * 1024)
 #define LIST_MAX            2000
@@ -45,11 +50,12 @@ static esp_timer_handle_t s_rescan_timer;
 
 // 요청 하나의 이름/경로 버퍼 (스택이 작아 힙에 둔다)
 typedef struct {
-    char album[QUERY_BUF_LEN];
+    char album[ALBUM_BUF_LEN];
     char name[QUERY_BUF_LEN];
     char path[PATH_LEN];
     char tmp[PATH_LEN + 256];   // 경로 + ".part" 또는 폴더 경로 + 항목 이름
     bool thumb;
+    bool readonly;              // 사진 피드 미러 폴더
 } photo_req_t;
 
 // ---- 이름 / 경로 ----
@@ -65,10 +71,17 @@ static bool is_photo(const char *name)   // photo_loader 와 같은 기준
     return name[0] != '.' && (has_ext(name, "jpg") || has_ext(name, "jpeg") || has_ext(name, "png"));
 }
 
-// 숨김/시스템 폴더와 Flickr 미러 폴더 (app_flickr 가 관리: 여기에 올리거나 지우면 다음 동기화 때 되돌아간다)
+// 숨김/시스템 폴더 (썸네일 .thumbs 포함)
 static bool skip_dir(const char *name)
 {
-    return name[0] == '.' || strcasecmp(name, "System Volume Information") == 0 || strcasecmp(name, "flickr") == 0;
+    return name[0] == '.' || strcasecmp(name, "System Volume Information") == 0;
+}
+
+// 사진 피드 미러 폴더와 그 아래: photo_feed 가 관리 (여기에 올리거나 지우면 다음 동기화 때 되돌아간다)
+static bool is_readonly(const char *album)
+{
+    size_t n = strlen(PHOTO_FEED_DIR_NAME);
+    return strncasecmp(album, PHOTO_FEED_DIR_NAME, n) == 0 && (album[n] == '\0' || album[n] == '/');
 }
 
 // 파일/폴더 이름 하나로 쓸 수 있는지 (경로 구분자, FAT 금지 문자, 숨김 이름 거부)
@@ -87,6 +100,71 @@ static bool valid_name(const char *s, bool allow_empty)
         }
     }
     return true;
+}
+
+// "a/b/c" 형식의 상대 경로: 각 이름이 valid_name 이고 숨김 폴더가 아니며 ALBUM_MAX_DEPTH 단계 이하
+static bool valid_album(const char *album)
+{
+    if (album[0] == '\0') {
+        return true;
+    }
+    if (strlen(album) > ALBUM_MAX_BYTES) {
+        return false;
+    }
+    char seg[NAME_MAX_BYTES + 1];
+    int depth = 0;
+    for (const char *p = album;;) {
+        const char *slash = strchr(p, '/');
+        size_t n = slash ? (size_t)(slash - p) : strlen(p);
+        if (n == 0 || n > NAME_MAX_BYTES || ++depth > ALBUM_MAX_DEPTH) {
+            return false;
+        }
+        memcpy(seg, p, n);
+        seg[n] = '\0';
+        if (!valid_name(seg, false) || skip_dir(seg)) {
+            return false;
+        }
+        if (!slash) {
+            return true;
+        }
+        p = slash + 1;
+    }
+}
+
+static int album_depth(const char *album)
+{
+    if (album[0] == '\0') {
+        return 0;
+    }
+    int depth = 1;
+    for (const char *p = album; *p; p++) {
+        depth += *p == '/';
+    }
+    return depth;
+}
+
+// mkdir -p: 사진 폴더부터 album 의 각 단계를 만든다 (이미 있으면 실패하지만 무시)
+static void make_album_dirs(const char *album, char *buf, size_t size)
+{
+    snprintf(buf, size, "%s", PHOTO_DIR);
+    mkdir(buf, 0775);
+    size_t len = strlen(buf);
+    for (const char *p = album; *p && len + 2 < size;) {
+        const char *slash = strchr(p, '/');
+        size_t n = slash ? (size_t)(slash - p) : strlen(p);
+        if (len + 1 + n >= size) {
+            return;
+        }
+        buf[len++] = '/';
+        memcpy(buf + len, p, n);
+        len += n;
+        buf[len] = '\0';
+        mkdir(buf, 0775);
+        if (!slash) {
+            break;
+        }
+        p = slash + 1;
+    }
 }
 
 static void album_dir(const char *album, bool thumb, char *out, size_t size)
@@ -131,7 +209,8 @@ static photo_req_t *parse_request(httpd_req_t *req, bool need_name)
         web_send_error(req, "503 Service Unavailable", "no sd card");
         return NULL;
     }
-    photo_req_t *r = calloc(1, sizeof(photo_req_t));
+    // 약 2.5KB: 내부 RAM 이 아니라 PSRAM 에 (FatFs 는 PSRAM 의 경로 문자열도 문제없음)
+    photo_req_t *r = heap_caps_calloc(1, sizeof(photo_req_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!r) {
         web_send_error(req, "500 Internal Server Error", "no memory");
         return NULL;
@@ -140,8 +219,9 @@ static photo_req_t *parse_request(httpd_req_t *req, bool need_name)
     web_query_param(req, "name", r->name, sizeof(r->name));
     char thumb[4];
     r->thumb = web_query_param(req, "thumb", thumb, sizeof(thumb)) && strcmp(thumb, "1") == 0;
+    r->readonly = is_readonly(r->album);
 
-    if (!valid_name(r->album, true) || (r->album[0] && skip_dir(r->album))) {
+    if (!valid_album(r->album)) {
         web_send_error(req, "400 Bad Request", "album");
     } else if (need_name && (!valid_name(r->name, false) || !is_photo(r->name))) {
         web_send_error(req, "400 Bad Request", "name");
@@ -216,13 +296,26 @@ static esp_err_t get_list(httpd_req_t *req)
     }
     album_dir(r->album, false, r->path, sizeof(r->path));
     cJSON *root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "readonly", r->readonly);
+    cJSON *dirs = cJSON_AddArrayToObject(root, "dirs");
     cJSON *list = cJSON_AddArrayToObject(root, "photos");
+    bool deeper = album_depth(r->album) < ALBUM_MAX_DEPTH;   // 전자앨범이 읽는 깊이까지만
     DIR *d = opendir(r->path);
     if (d) {
         struct dirent *e;
         int n = 0;
+        size_t base = strlen(r->path);
         while ((e = readdir(d)) && n < LIST_MAX) {
-            if (e->d_type != DT_DIR && is_photo(e->d_name)) {
+            if (e->d_type == DT_DIR) {
+                if (!deeper || skip_dir(e->d_name) || strlen(e->d_name) > NAME_MAX_BYTES ||
+                    snprintf(r->tmp, sizeof(r->tmp), "%.*s/%s", (int)base, r->path, e->d_name) >= (int)sizeof(r->tmp)) {
+                    continue;
+                }
+                cJSON *item = cJSON_CreateObject();
+                cJSON_AddStringToObject(item, "name", e->d_name);
+                cJSON_AddNumberToObject(item, "count", count_photos(r->tmp));   // 바로 아래 사진 수
+                cJSON_AddItemToArray(dirs, item);
+            } else if (is_photo(e->d_name)) {
                 cJSON_AddItemToArray(list, cJSON_CreateString(e->d_name));
                 n++;
             }
@@ -364,14 +457,16 @@ static esp_err_t post_upload(httpd_req_t *req)
     if (!r) {
         return ESP_OK;
     }
+    if (r->readonly) {
+        free(r);
+        return web_send_error(req, "403 Forbidden", "read only");
+    }
     if (!has_ext(r->name, "jpg") && !has_ext(r->name, "jpeg")) {
         free(r);
         return web_send_error(req, "400 Bad Request", "name");
     }
 
-    mkdir(PHOTO_DIR, 0775);   // 이미 있으면 실패하지만 무시
-    album_dir(r->album, false, r->path, sizeof(r->path));
-    mkdir(r->path, 0775);
+    make_album_dirs(r->album, r->path, sizeof(r->path));   // 새 하위 폴더면 단계별로 만든다
     if (r->thumb) {
         album_dir(r->album, true, r->path, sizeof(r->path));
         mkdir(r->path, 0775);
@@ -441,6 +536,10 @@ static esp_err_t post_delete(httpd_req_t *req)
     photo_req_t *r = parse_request(req, true);
     if (!r) {
         return ESP_OK;
+    }
+    if (r->readonly) {
+        free(r);
+        return web_send_error(req, "403 Forbidden", "read only");
     }
     photo_path(r, false, r->path, sizeof(r->path));
     if (unlink(r->path) != 0) {

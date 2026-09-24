@@ -1,8 +1,8 @@
 idf_component_register(
-    SRCS "web_server.c" "web_photos.c" "web_flickr.c" "web_ota.c"
+    SRCS "web_server.c" "web_photos.c" "web_feeds.c" "web_ota.c"
     INCLUDE_DIRS "include"
     REQUIRES esp_http_server
-    PRIV_REQUIRES app_core storage net board app_flickr ota esp_wifi esp_timer esp_app_format
+    PRIV_REQUIRES app_core storage net board photo_feed ota services esp_wifi esp_timer esp_app_format
 )
 
 # www/index.html is gzipped at build time and embedded in the app image, so an

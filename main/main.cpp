@@ -5,7 +5,7 @@
 #include <time.h>
 
 #include "app_state.h"
-#include "app_flickr.h"
+#include "photo_feed.h"
 #include "app_storage.h"
 #include "board.h"
 #include "media_ble.h"
@@ -71,8 +71,8 @@ extern "C" void app_main(void)
     ESP_ERROR_CHECK(wifi_mgr_start(settings.wifi_ssid, settings.wifi_pass));
     ESP_ERROR_CHECK(time_sync_start());
     ESP_ERROR_CHECK(ota_init());           // 업데이트 직후면 60초 뒤 롤백 취소
-    ESP_ERROR_CHECK(app_flickr_init());
-    ESP_ERROR_CHECK(net_worker_start());   // 날씨/주가/Flickr 사진 피드/업데이트 확인
+    ESP_ERROR_CHECK(photo_feed_init());
+    ESP_ERROR_CHECK(net_worker_start());   // 날씨/주가/사진 피드/업데이트 확인
     if (web_server_start() != ESP_OK) {    // 브라우저 설정 페이지 (없어도 기기는 동작)
         ESP_LOGW(TAG, "web server unavailable");
     }

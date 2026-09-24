@@ -60,6 +60,13 @@
   .tile button { position: absolute; top: 4px; right: 4px; padding: 2px 9px; background: rgba(0,0,0,.6);
                  border: 0; font-size: 16px; line-height: 1.4; }
   .tile button:hover { background: var(--bad); }
+  .tile.folder { cursor: pointer; background: var(--card-alt); display: flex; align-items: center; justify-content: center; }
+  .tile.folder .icon { font-size: 44px; margin-bottom: 18px; }
+  .tile.folder:hover { outline: 2px solid var(--accent); }
+  .crumbs { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; flex: 1; min-width: 0; }
+  .crumbs button { padding: 4px 10px; }
+  .crumbs button:disabled { opacity: 1; background: transparent; border-color: transparent; font-weight: 600; }
+  .crumbs span { color: var(--dim); }
   progress { width: 100%; accent-color: var(--accent); }
   .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.85); display: flex; align-items: center;
              justify-content: center; padding: 12px; z-index: 10; }
@@ -168,6 +175,20 @@
           </label>
         </div>
 
+        <h2 data-t="weather"></h2>
+        <div class="card">
+          <label class="row"><span data-t="owmKey"></span>
+            <div class="inline">
+              <input id="owm_api_key" maxlength="47" autocomplete="off" spellcheck="false">
+              <button type="button" id="owmClearBtn" data-t="clearKey" onclick="clearOwmKey()"></button>
+            </div>
+          </label>
+          <label class="row"><span data-t="city"></span>
+            <input id="weather_city" maxlength="63" autocomplete="off" placeholder="1835848 / Seoul,KR">
+          </label>
+          <p class="hint" data-t="weatherHint"></p>
+        </div>
+
         <h2 data-t="stocks"></h2>
         <div class="card">
           <label class="row"><span data-t="symbols"></span>
@@ -190,12 +211,10 @@
       <h2 data-t="tabPhotos"></h2>
       <div class="card">
         <p id="noSd" class="msg err" data-t="noSd" hidden></p>
-        <label class="row"><span data-t="album"></span>
-          <div class="inline">
-            <select id="album"></select>
-            <button type="button" data-t="newAlbum" onclick="newAlbum()"></button>
-          </div>
-        </label>
+        <div class="inline" style="align-items:center">
+          <div id="crumbs" class="crumbs"></div>
+          <button type="button" id="newFolderBtn" data-t="newAlbum" onclick="newAlbum()"></button>
+        </div>
         <div class="inline">
           <button type="button" class="primary" id="addBtn" data-t="addPhotos" onclick="$('files').click()"></button>
           <input type="file" id="files" accept="image/*" multiple hidden>
@@ -206,20 +225,20 @@
           <p id="uploadText" class="hint"></p>
         </div>
       </div>
-      <h2>Flickr</h2>
+      <h2 data-t="feedsTitle"></h2>
       <div class="card">
         <div id="feeds" style="display:grid; gap:6px"></div>
         <div class="inline">
           <input id="feedUrl" autocomplete="off" inputmode="url"
-                 placeholder="https://www.flickr.com/services/feeds/photos_public.gne?id=...&amp;format=rss2">
+                 placeholder="https://example.com/feed.xml">
           <button type="button" id="addFeedBtn" data-t="addFeed" onclick="addFeed()"></button>
         </div>
-        <p class="hint" data-t="flickrHint"></p>
+        <p class="hint" data-t="feedHint"></p>
         <div class="inline" style="align-items:center">
-          <p id="flickrStatus" class="hint" style="flex:1"></p>
-          <button type="button" id="syncBtn" data-t="syncNow" onclick="syncFlickr()"></button>
+          <p id="feedStatus" class="hint" style="flex:1"></p>
+          <button type="button" id="syncBtn" data-t="syncNow" onclick="syncFeeds()"></button>
         </div>
-        <p id="flickrMsg" class="msg" style="margin:0"></p>
+        <p id="feedMsg" class="msg" style="margin:0"></p>
       </div>
       <h2 data-t="gallery"></h2>
       <p id="photoMsg" class="msg"></p>
@@ -264,6 +283,9 @@ const T = {
     display: "화면", language: "언어", mode: "화면 모드", widget: "위젯형", slide: "슬라이드형",
     rotation: "회전", rotationHint: "회전은 다시 시작한 뒤 적용됩니다.",
     photo: "전자앨범", interval: "전환 간격 (초)", stocks: "주식", symbols: "종목",
+    weather: "날씨", owmKey: "OpenWeatherMap API 키", city: "도시", clearKey: "키 삭제",
+    weatherHint: "openweathermap.org 에서 무료로 발급한 API 키를 넣으면 OpenWeatherMap 으로 날씨를 받습니다 (새 키는 활성화까지 최대 2시간). 도시는 도시 ID (예: 1835848 = 서울, openweathermap.org/find 에서 검색) 또는 영문 이름,국가 (예: Busan,KR). 키가 없으면 Open-Meteo 로 기본 위치의 날씨를 받습니다.",
+    keySet: "설정됨", weatherStatus: { none: "대기 중", ok: "정상", network: "연결 실패", bad_key: "API 키 오류 (틀렸거나 아직 활성화 전)", city_not_found: "도시를 찾을 수 없음", http: "서버 오류", parse: "응답 오류" },
     symbolsHint: "쉼표로 구분한 Yahoo 종목 코드. ^KS11 = 코스피, 005930.KS = 삼성전자",
     save: "저장", saved: "저장했습니다.", saveFailed: "저장하지 못했습니다", restart: "다시 시작", logout: "로그아웃",
     restartNeeded: "화면 회전을 적용하려면 기기를 다시 시작해야 합니다.", restartConfirm: "기기를 다시 시작할까요?",
@@ -276,9 +298,11 @@ const T = {
     days: "일", hours: "시간", minutes: "분",
     tabSettings: "설정", tabPhotos: "사진",
     noSd: "SD 카드가 없습니다. 기기에 SD 카드를 넣고 다시 시작하세요.",
-    album: "앨범", rootAlbum: "(기본 폴더)", newAlbum: "새 앨범", newAlbumPrompt: "새 앨범 이름",
-    badAlbum: "앨범 이름에 / \\ : * ? \" < > | 를 쓸 수 없고 . 으로 시작할 수 없습니다.",
-    addPhotos: "사진 추가", more: "더 보기", empty: "이 앨범에 사진이 없습니다.",
+    album: "폴더", rootAlbum: "사진", newAlbum: "새 폴더", newAlbumPrompt: "새 폴더 이름 (지금 폴더 안에 만듭니다)",
+    tooDeep: "폴더는 4단계까지 만들 수 있습니다 (전자앨범이 읽는 깊이).",
+    readonlyFolder: "사진 피드 폴더는 동기화로 관리되므로 보기만 할 수 있습니다.",
+    badAlbum: "폴더 이름에 / \\ : * ? \" < > | 를 쓸 수 없고 . 으로 시작할 수 없습니다.",
+    addPhotos: "사진 추가", more: "더 보기", empty: "이 폴더에 사진이 없습니다.",
     uploadHint: "여러 장을 한 번에 고를 수 있습니다. 한 장씩 자를 영역을 정하면 브라우저에서 화면 크기에 맞게 줄여 JPEG 로 올립니다.",
     ratioLand: "화면 가로", ratioPort: "화면 세로", ratioFree: "자유", ratioFull: "전체",
     cropHint: "영역을 끌어서 옮기고, 모서리를 끌어서 크기를 바꿉니다.",
@@ -288,10 +312,11 @@ const T = {
     deleteConfirm: "이 사진을 삭제할까요?", busy: "기기가 이 사진을 표시하는 중입니다. 잠시 후 다시 시도하세요.",
     deleteFailed: "삭제하지 못했습니다",
     gallery: "앨범 사진", addFeed: "추가", syncNow: "지금 동기화", removeFeed: "이 피드를 삭제할까요? 받아 둔 사진도 SD 카드에서 지워집니다.",
-    flickrHint: "Flickr 피드(RSS 2.0/Atom) 주소를 추가하면 1시간마다 새 사진을 SD 카드(photos/flickr)에 받아 전자앨범에 함께 표시합니다. 피드에서 빠진 사진과 삭제한 피드의 사진은 지워집니다. 사용자 ID 는 idgettr 같은 사이트나 Flickr 사진 페이지 소스에서 찾을 수 있습니다.",
+    feedsTitle: "사진 피드 (RSS)",
+    feedHint: "이미지가 들어 있는 RSS 2.0 / Atom 피드 주소를 추가하면 1시간마다 새 사진을 SD 카드(photos/feeds)에 받아 전자앨범에 함께 표시합니다. 항목마다 media:content, enclosure, media:thumbnail, 본문의 첫 <img> 순서로 이미지를 찾습니다. 예: Flickr https://www.flickr.com/services/feeds/photos_public.gne?id=사용자ID&format=rss2 (사용자 ID 는 idgettr 등에서 확인). 피드에서 빠진 사진과 삭제한 피드의 사진은 지워지고, JPEG/PNG 가 아닌 이미지(WebP, GIF)는 건너뜁니다.",
     noFeeds: "등록된 피드가 없습니다.", badFeed: "http:// 또는 https:// 로 시작하는 피드 주소를 입력하세요.", tooManyFeeds: "피드는 최대 {n}개까지 등록할 수 있습니다.",
     syncing: "동기화 중...", lastSync: "마지막 동기화", neverSynced: "아직 동기화하지 않음", images: "사진",
-    unsupported: "표시할 수 없는 사진(progressive JPEG)", syncError: "오류", syncRequested: "동기화를 요청했습니다.",
+    unsupported: "표시할 수 없는 사진(progressive JPEG)", skippedImages: "건너뛴 항목(JPEG/PNG 아님)", syncError: "오류", syncRequested: "동기화를 요청했습니다.",
   },
   en: {
     title: "Smart Display Settings", pinHelp: "Enter the 6-digit PIN shown on the device under Settings (gear) > Web settings.",
@@ -303,6 +328,9 @@ const T = {
     display: "Display", language: "Language", mode: "Layout", widget: "Widgets", slide: "Slides",
     rotation: "Rotation", rotationHint: "Rotation is applied after a restart.",
     photo: "Photo frame", interval: "Interval (seconds)", stocks: "Stocks", symbols: "Symbols",
+    weather: "Weather", owmKey: "OpenWeatherMap API key", city: "City", clearKey: "Remove key",
+    weatherHint: "With a free API key from openweathermap.org, weather comes from OpenWeatherMap (a new key can take up to 2 hours to activate). City: city ID (e.g. 1835848 = Seoul, search at openweathermap.org/find) or name,country (e.g. Busan,KR). Without a key, Open-Meteo is used for the built-in location.",
+    keySet: "set", weatherStatus: { none: "waiting", ok: "OK", network: "connection failed", bad_key: "API key error (wrong or not active yet)", city_not_found: "city not found", http: "server error", parse: "bad response" },
     symbolsHint: "Comma separated Yahoo symbols. ^KS11 = KOSPI, 005930.KS = Samsung",
     save: "Save", saved: "Saved.", saveFailed: "Save failed", restart: "Restart", logout: "Sign out",
     restartNeeded: "Restart the device to apply the new screen rotation.", restartConfirm: "Restart the device?",
@@ -315,9 +343,11 @@ const T = {
     days: "d", hours: "h", minutes: "m",
     tabSettings: "Settings", tabPhotos: "Photos",
     noSd: "No SD card. Insert an SD card into the device and restart it.",
-    album: "Album", rootAlbum: "(main folder)", newAlbum: "New album", newAlbumPrompt: "New album name",
-    badAlbum: "Album names cannot contain / \\ : * ? \" < > | or start with a dot.",
-    addPhotos: "Add photos", more: "Show more", empty: "No photos in this album.",
+    album: "Folder", rootAlbum: "Photos", newAlbum: "New folder", newAlbumPrompt: "New folder name (inside the current folder)",
+    tooDeep: "Folders can be nested up to 4 levels (the depth the photo frame reads).",
+    readonlyFolder: "Photo feed folders are managed by the sync and are read-only.",
+    badAlbum: "Folder names cannot contain / \\ : * ? \" < > | or start with a dot.",
+    addPhotos: "Add photos", more: "Show more", empty: "This folder is empty.",
     uploadHint: "You can pick several photos at once. Choose the area for each one; the browser shrinks it to the screen size and uploads a JPEG.",
     ratioLand: "Landscape", ratioPort: "Portrait", ratioFree: "Free", ratioFull: "Whole",
     cropHint: "Drag the area to move it, drag a corner to resize it.",
@@ -327,10 +357,11 @@ const T = {
     deleteConfirm: "Delete this photo?", busy: "The device is showing this photo right now. Try again in a moment.",
     deleteFailed: "Delete failed",
     gallery: "Album photos", addFeed: "Add", syncNow: "Sync now", removeFeed: "Remove this feed? Its downloaded photos are deleted from the SD card too.",
-    flickrHint: "Add a Flickr feed (RSS 2.0/Atom) and the device downloads its new photos every hour to the SD card (photos/flickr) and shows them in the photo frame. Photos that leave the feed, and those of removed feeds, are deleted. Find a user ID with a site such as idgettr or in a Flickr photo page's source.",
+    feedsTitle: "Photo feeds (RSS)",
+    feedHint: "Add an RSS 2.0 / Atom feed that carries images and the device downloads its new photos every hour to the SD card (photos/feeds) and shows them in the photo frame. Per item it takes media:content, enclosure, media:thumbnail, then the first <img> in the text. Example: Flickr https://www.flickr.com/services/feeds/photos_public.gne?id=USER_ID&format=rss2 (find the ID with a site such as idgettr). Photos that leave the feed, and those of removed feeds, are deleted; images that are not JPEG/PNG (WebP, GIF) are skipped.",
     noFeeds: "No feeds yet.", badFeed: "Enter a feed address starting with http:// or https://.", tooManyFeeds: "Up to {n} feeds.",
     syncing: "Syncing...", lastSync: "Last sync", neverSynced: "Not synced yet", images: "photos",
-    unsupported: "not displayable (progressive JPEG)", syncError: "error", syncRequested: "Sync requested.",
+    unsupported: "not displayable (progressive JPEG)", skippedImages: "skipped (not JPEG/PNG)", syncError: "error", syncRequested: "Sync requested.",
   },
 };
 const $ = id => document.getElementById(id);
@@ -349,8 +380,9 @@ function applyLang() {
   $("uiLang").value = lang;
   document.querySelectorAll("[data-t]").forEach(el => { el.textContent = t(el.dataset.t); });
   $("wifi_pass").placeholder = loaded && loaded.wifi_pass_set ? "••••••••" : "";
-  const root = $("album").querySelector('option[value=""]');
-  if (root) root.textContent = albumLabel({ name: "", count: root.dataset.count });
+  $("owm_api_key").placeholder = loaded && loaded.owm_api_key_set ? `${t("keySet")} (…${loaded.owm_api_key_hint})` : "";
+  $("owmClearBtn").hidden = !(loaded && loaded.owm_api_key_set);
+  renderCrumbs();
 }
 
 class ApiError extends Error { constructor(status, code) { super(code); this.status = status; } }
@@ -394,7 +426,7 @@ function showTab(name) {
   $("tab-photos").hidden = name !== "photos";
   if (name === "photos") {
     loadAlbums().catch(e => { if (!handleAuth(e)) setMsg($("photoMsg"), errText(e), "err"); });
-    loadFlickr().catch(e => { if (!handleAuth(e)) setMsg($("flickrMsg"), errText(e), "err"); });
+    loadFeeds().catch(e => { if (!handleAuth(e)) setMsg($("feedMsg"), errText(e), "err"); });
   }
 }
 document.querySelectorAll("nav button").forEach(b => { b.onclick = () => showTab(b.dataset.tab); });
@@ -436,6 +468,7 @@ async function refreshStatus() {
     [t("time"), time],
     [t("uptime"), fmtUptime(s.uptime_s)],
     [t("memory"), `internal ${s.heap_internal_kb} KB · PSRAM ${s.heap_psram_kb} KB`],
+    [t("weather"), weatherText(s.weather)],
   ];
   const dl = $("status");
   dl.replaceChildren();
@@ -448,11 +481,29 @@ async function refreshStatus() {
 }
 
 // ---- 설정 ----
-const FIELDS = ["wifi_ssid", "language", "ui_mode", "rotation", "photo_interval_s", "stock_symbols"];
+const FIELDS = ["wifi_ssid", "language", "ui_mode", "rotation", "photo_interval_s", "stock_symbols", "weather_city"];
+
+function weatherText(w) {
+  if (!w) return "";
+  const src = w.provider === "openweathermap" ? "OpenWeatherMap" : "Open-Meteo";
+  const now = w.temp != null ? `  ·  ${w.city ? w.city + " " : ""}${w.temp.toFixed(1)}°C, ${w.humidity}%` : "";
+  return `${src}  ·  ${t("weatherStatus")[w.status] || w.status}${now}`;
+}
+
+async function clearOwmKey() {
+  try {
+    await api("/api/settings", { owm_api_key: "" });
+    await loadSettings();
+    await refreshStatus();
+  } catch (e) {
+    if (!handleAuth(e)) setMsg($("msg"), errText(e), "err");
+  }
+}
 async function loadSettings() {
   loaded = await api("/api/settings");
   for (const f of FIELDS) $(f).value = loaded[f];
   $("wifi_pass").value = "";
+  $("owm_api_key").value = "";
   applyLang();
 }
 
@@ -465,10 +516,14 @@ $("form").onsubmit = async ev => {
     rotation: Number($("rotation").value),
     photo_interval_s: Number($("photo_interval_s").value),
     stock_symbols: $("stock_symbols").value.replace(/\s+/g, ""),
+    weather_city: $("weather_city").value.trim(),
   };
   // 비밀번호: 새로 입력했거나, 네트워크를 바꿨으면 (빈 값 = 공개 네트워크) 보낸다
   const pass = $("wifi_pass").value;
   if (pass || body.wifi_ssid !== loaded.wifi_ssid) body.wifi_pass = pass;
+  // API 키: 새로 입력한 경우만 보낸다 (지우기는 [키 삭제])
+  const key = $("owm_api_key").value.trim();
+  if (key) body.owm_api_key = key;
 
   $("saveBtn").disabled = true;
   try {
@@ -590,59 +645,112 @@ async function restart() {
   }
 }
 
-// ---- 사진: 앨범 / 목록 ----
+// ---- 사진: 폴더 / 목록 ----
 const PAGE = 60;                 // 한 번에 보여줄 사진 수
-let photos = [];                 // 현재 앨범의 파일 이름 (정렬됨)
+const MAX_DEPTH = 4;             // 전자앨범이 읽는 하위 폴더 깊이
+let curAlbum = null;             // 사진 폴더 기준 상대 경로 ("" = 맨 위, "a/b" = 하위 폴더)
+let readonly = false;            // 사진 피드 미러 폴더: 보기만
+let pendingDirs = [];            // 만들었지만 아직 사진이 없는 새 폴더 (사진을 올리면 기기에 생김)
+let dirs = [];                   // 현재 폴더의 하위 폴더 [{name, count}]
+let photos = [];                 // 현재 폴더의 파일 이름 (정렬됨)
 let shown = 0;
 let thumbUrls = [];              // 해제할 blob URL
-let listGen = 0;                 // 앨범을 바꾸면 이전 썸네일 로딩을 멈추기 위한 번호
+let listGen = 0;                 // 폴더를 바꾸면 이전 썸네일 로딩을 멈추기 위한 번호
 
 const q = (album, name, extra) =>
   `album=${encodeURIComponent(album)}` + (name != null ? `&name=${encodeURIComponent(name)}` : "") + (extra || "");
-function albumLabel(a) { return `${a.name || t("rootAlbum")} (${a.count})`; }
 function validName(s) { return s && !/[\/\\:*?"<>|\x00-\x1f]/.test(s) && !/^[. ]|[. ]$/.test(s) && new TextEncoder().encode(s).length <= 80; }
+const joinPath = (a, b) => a ? `${a}/${b}` : b;
+const depthOf = p => p ? p.split("/").length : 0;
+const byName = (a, b) => a.localeCompare(b, undefined, { numeric: true });
 
-async function loadAlbums(select) {
-  const r = await api("/api/photos");
-  $("noSd").hidden = r.sd;
-  $("addBtn").disabled = !r.sd;
-  const sel = $("album");
-  const want = select ?? (sel.options.length ? sel.value : store.get("album")) ?? "";
-  sel.replaceChildren();
-  for (const a of r.albums) {
-    const o = document.createElement("option");
-    o.value = a.name; o.dataset.count = a.count; o.textContent = albumLabel(a);
-    sel.append(o);
+// 사진 탭을 열 때: SD 카드 확인 후 마지막으로 보던 폴더 (없어졌으면 빈 목록 → 경로에서 위로 이동)
+async function loadAlbums(path) {
+  if (path !== undefined) curAlbum = path;
+  else if (curAlbum === null) curAlbum = store.get("album") || "";
+  const st = await api("/api/photos");
+  $("noSd").hidden = st.sd;
+  $("addBtn").disabled = !st.sd;
+  $("newFolderBtn").disabled = !st.sd;
+  if (!st.sd) {
+    $("gallery").replaceChildren();
+    $("crumbs").replaceChildren();
+    return;
   }
-  if (want && ![...sel.options].some(o => o.value === want)) {   // 아직 사진이 없는 새 앨범
-    const o = document.createElement("option");
-    o.value = want; o.dataset.count = 0; o.textContent = albumLabel({ name: want, count: 0 });
-    sel.append(o);
+  try {
+    await loadPhotos();
+  } catch (e) {
+    if (e.status !== 400 || !curAlbum) throw e;
+    curAlbum = "";   // 저장된 경로가 더 이상 올바르지 않음
+    await loadPhotos();
   }
-  sel.value = [...sel.options].some(o => o.value === want) ? want : "";
-  if (r.sd) await loadPhotos();
-  else $("gallery").replaceChildren();
 }
-$("album").onchange = () => { store.set("album", $("album").value); loadPhotos().catch(e => setMsg($("photoMsg"), errText(e), "err")); };
+
+function openFolder(path) {
+  curAlbum = path;
+  store.set("album", path);
+  loadPhotos().catch(e => { if (!handleAuth(e)) setMsg($("photoMsg"), errText(e), "err"); });
+}
+
+function renderCrumbs() {
+  const box = $("crumbs");
+  box.replaceChildren();
+  if (curAlbum === null) return;
+  const parts = curAlbum ? curAlbum.split("/") : [];
+  const add = (label, path, last) => {
+    if (box.childElementCount) {
+      const sep = document.createElement("span"); sep.textContent = "/";
+      box.append(sep);
+    }
+    const b = document.createElement("button");
+    b.type = "button"; b.textContent = label; b.disabled = last;
+    b.onclick = () => openFolder(path);
+    box.append(b);
+  };
+  add(t("rootAlbum"), "", parts.length === 0);
+  parts.forEach((p, i) => add(p, parts.slice(0, i + 1).join("/"), i === parts.length - 1));
+}
 
 function newAlbum() {
   const name = (prompt(t("newAlbumPrompt")) || "").trim();
   if (!name) return;
   if (!validName(name)) { setMsg($("photoMsg"), t("badAlbum"), "err"); return; }
-  store.set("album", name);
-  loadAlbums(name).catch(e => setMsg($("photoMsg"), errText(e), "err"));
+  if (depthOf(curAlbum) >= MAX_DEPTH) { setMsg($("photoMsg"), t("tooDeep"), "err"); return; }
+  const path = joinPath(curAlbum, name);
+  if (!pendingDirs.includes(path)) pendingDirs.push(path);
+  openFolder(path);
 }
 
 async function loadPhotos() {
-  const album = $("album").value;
-  const r = await api("/api/photos/list?" + q(album));
-  photos = r.photos.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  const r = await api("/api/photos/list?" + q(curAlbum));
+  readonly = r.readonly;
+  dirs = r.dirs.sort((a, b) => byName(a.name, b.name));
+  for (const p of pendingDirs) {   // 아직 사진이 없는 새 폴더도 보이게
+    const slash = p.lastIndexOf("/");
+    const parent = slash < 0 ? "" : p.slice(0, slash), name = p.slice(slash + 1);
+    if (parent === curAlbum && !dirs.some(d => d.name === name)) dirs.push({ name, count: 0 });
+  }
+  photos = r.photos.sort(byName);
   listGen++;
   thumbUrls.forEach(URL.revokeObjectURL);
   thumbUrls = [];
   shown = 0;
-  $("gallery").replaceChildren();
-  setMsg($("photoMsg"), photos.length ? "" : t("empty"));
+  renderCrumbs();
+  $("addBtn").disabled = readonly;
+  $("newFolderBtn").disabled = readonly || depthOf(curAlbum) >= MAX_DEPTH;
+
+  const gallery = $("gallery");
+  gallery.replaceChildren();
+  for (const d of dirs) {
+    const tile = document.createElement("div");
+    tile.className = "tile folder";
+    const icon = document.createElement("div"); icon.className = "icon"; icon.textContent = "📁";
+    const cap = document.createElement("span"); cap.textContent = `${d.name} (${d.count})`;
+    tile.append(icon, cap);
+    tile.onclick = () => openFolder(joinPath(curAlbum, d.name));
+    gallery.append(tile);
+  }
+  setMsg($("photoMsg"), readonly ? t("readonlyFolder") : photos.length || dirs.length ? "" : t("empty"));
   renderMore();
 }
 
@@ -664,7 +772,7 @@ async function pumpThumbs() {
 }
 
 function renderMore() {
-  const album = $("album").value;
+  const album = curAlbum;
   const end = Math.min(shown + PAGE, photos.length);
   for (; shown < end; shown++) {
     const name = photos[shown];
@@ -672,9 +780,12 @@ function renderMore() {
     tile.className = "tile";
     const img = document.createElement("img"); img.alt = name;
     const cap = document.createElement("span"); cap.textContent = name;
-    const del = document.createElement("button"); del.type = "button"; del.textContent = "×"; del.title = t("deleteConfirm");
-    del.onclick = () => deletePhoto(album, name, tile);
-    tile.append(img, cap, del);
+    tile.append(img, cap);
+    if (!readonly) {
+      const del = document.createElement("button"); del.type = "button"; del.textContent = "×"; del.title = t("deleteConfirm");
+      del.onclick = () => deletePhoto(album, name, tile);
+      tile.append(del);
+    }
     $("gallery").append(tile);
     queueThumb(img, album, name, listGen);
   }
@@ -689,9 +800,7 @@ async function deletePhoto(album, name, tile) {
       tile.remove();
       photos = photos.filter(p => p !== name);
       shown--;
-      const opt = $("album").selectedOptions[0];
-      if (opt) { opt.dataset.count = photos.length; opt.textContent = albumLabel({ name: album, count: photos.length }); }
-      if (!photos.length) setMsg($("photoMsg"), t("empty"));
+      if (!photos.length && !dirs.length) setMsg($("photoMsg"), t("empty"));
       return;
     } catch (e) {
       if (e.status === 409 && e.message === "busy" && attempt < 3) { await sleep(1500); continue; }
@@ -840,7 +949,7 @@ function jpegName(fileName) {
 }
 
 async function uploadFiles(files) {
-  const album = $("album").value;
+  const album = curAlbum || "";
   let done = 0;
   const failed = [];
   autoMode = null;
@@ -886,24 +995,25 @@ async function uploadFiles(files) {
     autoMode = null;
   }
   const text = `${done} ${t("uploadDone")}` + (failed.length ? `  ${t("uploadFailed")}: ${failed.join(", ")}` : "");
+  if (done) pendingDirs = pendingDirs.filter(p => !(album === p || album.startsWith(p + "/")));   // 이제 기기에 있음
   await loadAlbums(album).catch(() => {});
   setMsg($("photoMsg"), text, failed.length ? "warn" : "ok");
 }
 
-// ---- Flickr 피드 ----
-let flickr = null;          // 마지막 GET /api/flickr
-let flickrTimer = null;
+// ---- 사진 피드 (RSS) ----
+let feedInfo = null;          // 마지막 GET /api/feeds
+let feedTimer = null;
 let watchSync = null;       // { since: 요청 전 last_sync, until: 시각 } 동기화가 끝날 때까지 상태를 다시 읽음
 
-async function loadFlickr() {
-  flickr = await api("/api/flickr");
+async function loadFeeds() {
+  feedInfo = await api("/api/feeds");
   const box = $("feeds");
   box.replaceChildren();
-  if (!flickr.feeds.length) {
+  if (!feedInfo.feeds.length) {
     const p = document.createElement("p"); p.className = "hint"; p.textContent = t("noFeeds");
     box.append(p);
   }
-  for (const url of flickr.feeds) {
+  for (const url of feedInfo.feeds) {
     const row = document.createElement("div"); row.className = "feed";
     const span = document.createElement("span"); span.textContent = url; span.title = url;
     const del = document.createElement("button"); del.type = "button"; del.textContent = "×";
@@ -911,60 +1021,61 @@ async function loadFlickr() {
     row.append(span, del);
     box.append(row);
   }
-  const s = flickr.status;
+  const s = feedInfo.status;
   let text = s.syncing ? t("syncing")
            : s.last_sync ? `${t("lastSync")}: ${new Date(s.last_sync * 1000).toLocaleString(lang)}` : t("neverSynced");
   text += `  ·  ${t("images")} ${s.image_count}`;
   if (s.unsupported) text += `  ·  ${t("unsupported")} ${s.unsupported}`;
+  if (s.skipped) text += `  ·  ${t("skippedImages")} ${s.skipped}`;
   if (s.error) text += `  ·  ${t("syncError")}: ${s.error}`;
-  $("flickrStatus").textContent = text;
-  $("addFeedBtn").disabled = flickr.feeds.length >= flickr.max_feeds;
+  $("feedStatus").textContent = text;
+  $("addFeedBtn").disabled = feedInfo.feeds.length >= feedInfo.max_feeds;
 
-  clearTimeout(flickrTimer);
+  clearTimeout(feedTimer);
   if (watchSync && !s.syncing && s.last_sync !== watchSync.since) watchSync = null;   // 끝남
   if (watchSync && Date.now() > watchSync.until) watchSync = null;
   if ((s.syncing || watchSync) && tab === "photos") {
-    flickrTimer = setTimeout(() => loadFlickr().catch(() => {}), 3000);
+    feedTimer = setTimeout(() => loadFeeds().catch(() => {}), 3000);
   }
 }
 
 function startWatch() {
-  watchSync = { since: flickr ? flickr.status.last_sync : 0, until: Date.now() + 5 * 60 * 1000 };
-  setMsg($("flickrMsg"), t("syncRequested"), "ok");
-  setTimeout(() => loadFlickr().catch(() => {}), 1500);
+  watchSync = { since: feedInfo ? feedInfo.status.last_sync : 0, until: Date.now() + 5 * 60 * 1000 };
+  setMsg($("feedMsg"), t("syncRequested"), "ok");
+  setTimeout(() => loadFeeds().catch(() => {}), 1500);
 }
 
 async function saveFeeds(feeds) {
   try {
-    await api("/api/flickr", { feeds });
+    await api("/api/feeds", { feeds });
     startWatch();
-    await loadFlickr();
+    await loadFeeds();
     return true;
   } catch (e) {
-    if (!handleAuth(e)) setMsg($("flickrMsg"), errText(e), "err");
+    if (!handleAuth(e)) setMsg($("feedMsg"), errText(e), "err");
     return false;
   }
 }
 
 async function addFeed() {
   const url = $("feedUrl").value.trim();
-  if (!/^https?:\/\/\S+$/.test(url)) { setMsg($("flickrMsg"), t("badFeed"), "err"); return; }
-  if (flickr.feeds.length >= flickr.max_feeds) { setMsg($("flickrMsg"), t("tooManyFeeds").replace("{n}", flickr.max_feeds), "err"); return; }
-  if (flickr.feeds.includes(url)) { $("feedUrl").value = ""; return; }
-  if (await saveFeeds([...flickr.feeds, url])) $("feedUrl").value = "";
+  if (!/^https?:\/\/\S+$/.test(url)) { setMsg($("feedMsg"), t("badFeed"), "err"); return; }
+  if (feedInfo.feeds.length >= feedInfo.max_feeds) { setMsg($("feedMsg"), t("tooManyFeeds").replace("{n}", feedInfo.max_feeds), "err"); return; }
+  if (feedInfo.feeds.includes(url)) { $("feedUrl").value = ""; return; }
+  if (await saveFeeds([...feedInfo.feeds, url])) $("feedUrl").value = "";
 }
 
 async function removeFeed(url) {
   if (!confirm(`${t("removeFeed")}\n${url}`)) return;
-  await saveFeeds(flickr.feeds.filter(f => f !== url));
+  await saveFeeds(feedInfo.feeds.filter(f => f !== url));
 }
 
-async function syncFlickr() {
+async function syncFeeds() {
   try {
-    await api("/api/flickr/sync", {});
+    await api("/api/feeds/sync", {});
     startWatch();
   } catch (e) {
-    if (!handleAuth(e)) setMsg($("flickrMsg"), errText(e), "err");
+    if (!handleAuth(e)) setMsg($("feedMsg"), errText(e), "err");
   }
 }
 

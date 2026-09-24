@@ -1,4 +1,4 @@
-// 날씨: Open-Meteo 현재 날씨 (기온, 상태, 습도)
+// 날씨: 현재 날씨 (기온, 상태, 습도). 제공자는 OpenWeatherMap(API 키 설정 시) 또는 Open-Meteo
 // 아이콘은 Weather Icons TTF(/storage/fonts/weather-icons.ttf) 글리프로 그린다 (낮/밤 구분).
 // 폰트 파일이 없으면 상태별 색 원으로 대신 표시한다.
 
@@ -12,6 +12,7 @@
 #include "sdkconfig.h"
 
 typedef struct {
+    lv_obj_t *title;
     lv_obj_t *temp;
     lv_obj_t *cond;
     lv_obj_t *icon;         // 아이콘 폰트가 있으면 label, 없으면 색 원
@@ -45,8 +46,12 @@ static wmo_desc_t wmo_describe(int code)
 }
 
 // 영문 도시 이름 → 한국어 (Kconfig 파일은 ASCII 만 쓸 수 있어 여기서 변환)
-static const char *city_name(void)
+// name: OpenWeatherMap 이 알려 준 이름, 비어 있으면 Kconfig 의 이름
+static const char *city_name(const char *name)
 {
+    if (!name || !name[0]) {
+        name = CONFIG_APP_WEATHER_CITY;
+    }
     static const struct { const char *en, *ko; } k_cities[] = {
         { "Seoul", "서울" }, { "Busan", "부산" }, { "Incheon", "인천" }, { "Daegu", "대구" },
         { "Daejeon", "대전" }, { "Gwangju", "광주" }, { "Ulsan", "울산" }, { "Suwon", "수원" },
@@ -54,12 +59,17 @@ static const char *city_name(void)
     };
     if (ui_lang() == APP_LANG_KO) {
         for (size_t i = 0; i < sizeof(k_cities) / sizeof(k_cities[0]); i++) {
-            if (strcmp(k_cities[i].en, CONFIG_APP_WEATHER_CITY) == 0) {
+            if (strcmp(k_cities[i].en, name) == 0) {
                 return k_cities[i].ko;
             }
         }
     }
-    return CONFIG_APP_WEATHER_CITY;
+    return name;
+}
+
+static void set_title(weather_view_t *v, const char *city)
+{
+    lv_label_set_text_fmt(v->title, "%s  %s  %s", LV_SYMBOL_HOME, TR("Weather", "날씨"), city_name(city));
 }
 
 static void utf8_encode(uint32_t cp, char out[5])
@@ -80,6 +90,7 @@ static void weather_cb(lv_observer_t *o, lv_subject_t *s)
     weather_view_t *v = lv_obj_get_user_data(root);
     weather_info_t w;
     app_state_get_weather(&w);
+    set_title(v, w.valid ? w.city : NULL);
 
     if (!w.valid) {
         lv_label_set_text(v->temp, "--");
@@ -130,8 +141,8 @@ void ui_weather_create(lv_obj_t *parent, bool full)
     lv_obj_set_size(head, LV_PCT(100), LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(head, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(head, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_t *title = ui_card_title(head, LV_SYMBOL_HOME, "");
-    lv_label_set_text_fmt(title, "%s  %s  %s", LV_SYMBOL_HOME, TR("Weather", "날씨"), city_name());
+    v->title = ui_card_title(head, LV_SYMBOL_HOME, "");
+    set_title(v, NULL);
     if (full) {
         lv_obj_t *btn = lv_button_create(head);
         lv_obj_set_style_bg_color(btn, UI_COLOR_CARD_ALT, 0);

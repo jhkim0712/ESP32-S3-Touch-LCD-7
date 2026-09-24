@@ -34,7 +34,7 @@ ESP32-S3-Touch-LCD-7/
 │   │
 │   ├── net/          [Network]  wifi_mgr.c · time_sync.c(SNTP/KST) · http_util.c(HTTPS→PSRAM)
 │   │
-│   ├── services/     [Network]  weather.c(Open-Meteo) · stocks.c(Yahoo/AV) · net_worker.c
+│   ├── services/     [Network]  weather.c(OpenWeatherMap / Open-Meteo) · stocks.c(Yahoo/AV) · net_worker.c
 │   │
 │   ├── media_ble/    [BLE]      ble_core.c(NimBLE, bonding) · ams_client.c(iOS) · hid_media.c(Android)
 │   │
@@ -42,7 +42,7 @@ ESP32-S3-Touch-LCD-7/
 │   │
 │   ├── ota/          [OTA]      github_ota.c  Releases API, semver, esp_https_ota, rollback (net_worker 에서 호출)
 │   │
-│   ├── app_flickr/   [Network]  app_flickr.c  Flickr 피드 → SD 미러 (net_worker 에서 호출)
+│   ├── photo_feed/   [Network]  photo_feed.c  사진 RSS/Atom 피드 → SD 미러 (net_worker 에서 호출)
 │   │
 │   ├── web/          [Network]  web_server.c  esp_http_server + REST API + mDNS, www/index.html (gzip 내장)
 │   │
@@ -99,7 +99,7 @@ ESP32-S3-Touch-LCD-7/
 |---|---|---|---|---|
 | Wi-Fi / lwIP (시스템) | 0 | 23/18 | — | |
 | NimBLE host (시스템) | 0 | 21 | — | AMS/HID |
-| `net_worker` | 0 | 5 | 10 KB (PSRAM 불가: TLS) | 날씨 → 주가 → 업데이트 확인 → Flickr 동기화를 **직렬 처리**. 승인된 OTA 설치(다운로드·플래시 쓰기)도 여기서 실행 |
+| `net_worker` | 0 | 5 | 10 KB (PSRAM 불가: TLS) | 날씨 → 주가 → 업데이트 확인 → 사진 피드 동기화를 **직렬 처리**. 승인된 OTA 설치(다운로드·플래시 쓰기)도 여기서 실행 |
 | `lvgl` (esp_lvgl_port) | 1 | 4 | 12 KB (내부 RAM: 폰트 파일 flash 읽기) | 렌더링, 입력, 타이머(시계 1초 갱신). 한글 글리프를 처음 그릴 때 약 7.7KB 사용 |
 | `photo_loader` | 1 | 2 | 6 KB | 파일 읽기, JPEG 디코딩(LVGL 유휴 시간 사용) |
 | `httpd` (웹 설정) | 0 | 5 | 6 KB (내부 RAM: NVS 쓰기) | 웹 페이지, REST API. 동시 연결 3개 |
@@ -153,7 +153,7 @@ net_worker(core0) ─ http_get_alloc(open-meteo) ─ cJSON 파싱 ─ app_state_
   바꾸면 현재 화면을 다시 만들어 바로 적용합니다(재부팅 불필요). 날짜 형식("9월 23일 (수)"), 날씨 상태 문구도 함께 바뀝니다.
 - **날씨 아이콘:** 상태별 색 원 대신 PNG 아이콘을 LittleFS 에 넣어 표시합니다.
 
-## 2.8 웹 UI, 사진 업로드, Flickr 사진 동기화 (5-7 ~ 5-9)
+## 2.8 웹 UI, 사진 업로드, 사진 피드 동기화 (5-7 ~ 5-9)
 
 같은 공유기에 연결된 PC/휴대폰 브라우저에서 `http://smart-display.local` (mDNS) 또는 IP 로 접속합니다.
 
@@ -179,46 +179,48 @@ net_worker(core0) ─ http_get_alloc(open-meteo) ─ cJSON 파싱 ─ app_state_
   EXIF 방향은 브라우저가 적용해 그립니다.
 - 업로드는 한 파일씩 순서대로 `POST /api/photos/upload?album=&name=` 로 SD 에 바로 기록 (`.part` 임시 파일 → 완료 후 이름 변경,
   같은 이름이 있으면 `이름-1.jpg`). 이어서 240px 썸네일을 `<앨범>/.thumbs/` 에 올립니다 (전자앨범은 `.` 폴더를 건너뜀).
-- 앨범 = 사진 폴더 바로 아래 폴더. 앨범 목록/선택/새 앨범, 썸네일 보기(60장씩), 삭제. 마지막 사진을 지우면 앨범 폴더도 지웁니다.
+- 폴더 탐색: `album` 은 사진 폴더 기준 상대 경로(`a/b`, 전자앨범과 같은 4단계까지). 경로 표시줄과 폴더 타일로 이동하고,
+  새 폴더(첫 사진을 올릴 때 만들어짐), 썸네일 보기(60장씩), 삭제. 마지막 사진을 지우면 빈 폴더도 지웁니다.
+  `feeds` 폴더(사진 피드 미러)와 그 아래는 볼 수만 있습니다. 경로가 길어 `CONFIG_HTTPD_MAX_URI_LEN=1024`.
   PC 에서 직접 넣은 사진은 썸네일이 없어 원본을 받아 표시합니다.
 - 업로드/삭제 후 3초 동안 더 바뀌지 않으면 `APP_EVT_REQ_PHOTO_RESCAN` → `photo_loader` 가 목록을 다시 읽습니다 (표시 중인 사진은 유지).
 - 전자앨범이 읽고 있는 파일을 지우지 않도록 FatFs 파일 잠금(`CONFIG_FATFS_FS_LOCK`)을 켰습니다. 이때 삭제는 `409 busy` 가 되고 브라우저가 잠시 후 다시 시도합니다.
 
-**Flickr 피드 사진 동기화 (5-9, 구현됨: `components/app_flickr`, 웹 페이지 "사진" 탭의 Flickr 카드)**
+**사진 피드 동기화 (5-9, 구현됨: `components/photo_feed`, 웹 페이지 "사진" 탭의 "사진 피드 (RSS)" 카드)**
 
-다른 비슷한 프로젝트(480x320 보드)의 `app_flickr` 를 가져와 이 프로젝트 구조에 맞게 옮겼습니다.
+처음에는 다른 비슷한 프로젝트(480x320 보드)의 `app_flickr` 를 옮겨 Flickr 피드만 받았고,
+v0.2.3 에서 일반 RSS 2.0 / Atom 이미지 피드를 받도록 넓히면서 이름을 `photo_feed` 로 바꿨습니다.
 
-- 동작: 웹 UI 에서 Flickr 피드 URL(RSS 2.0/Atom, 예:
-  `https://www.flickr.com/services/feeds/photos_public.gne?id=<사용자 ID>&format=rss2`)을 추가하면,
-  주기적으로(`CONFIG_APP_FLICKR_SYNC_MIN`, 기본 1시간, 실패 시 10분 후) 피드를 받아 게시물 이미지를
-  `/sdcard/photos/flickr/<피드 URL 해시>/` 에 저장합니다. 전자앨범은 하위 폴더를 이미 탐색하므로 다른 사진과 함께 표시됩니다.
+- 동작: 웹 UI 에서 피드 URL 을 추가하면 주기적으로(`CONFIG_APP_FEED_SYNC_MIN`, 기본 1시간, 실패 시 10분 후) 피드를 받아
+  항목마다 이미지 하나를 `/sdcard/photos/feeds/<피드 URL 해시>/` 에 저장합니다. 전자앨범은 하위 폴더를 이미 탐색하므로 다른 사진과 함께 표시됩니다.
+  예: Flickr `https://www.flickr.com/services/feeds/photos_public.gne?id=<사용자 ID>&format=rss2`
 - 폴더는 피드의 **미러**입니다: 피드에서 빠진 이미지는 지우고, 피드를 삭제하면 그 폴더도 지웁니다.
-  그래서 웹 사진 관리에서는 `flickr` 폴더를 앨범 목록에서 빼고, 그 안으로 올리거나 지우는 요청도 거부합니다.
-- 이미지 URL: `<media:content url>` → `<enclosure url>` → Atom `<link rel="enclosure" href>` 순서로 찾습니다.
-  staticflickr.com 의 1024px(`_b`) 주소는 800px(`_c`)로 바꿔 받고, 없으면 원래 주소로 받습니다 (원본 코드는 480x320 용 640px `_z`).
-- 받는 중인 파일은 `.part` 로 쓰고 완료 후 이름을 바꿉니다. 피드는 256KB, 이미지는 4MB 까지만 받습니다.
+  그래서 웹 사진 관리에서는 `feeds` 폴더를 보기만 하고, 그 안으로 올리거나 지우는 요청은 거부합니다.
+- 항목(`<item>` / `<entry>`)의 이미지 찾기, 먼저 찾은 것 사용:
+  `<media:content url>` → `<enclosure url>` → Atom `<link rel="enclosure" href>` (셋 다 `type`/`medium` 이 이미지가 아니면 건너뜀)
+  → `<media:thumbnail url>` → 본문(`<description>`, `<content:encoded>`) HTML 의 첫 `<img src>` (CDATA 원문 또는 `&lt;img` 로 이스케이프된 HTML).
+  주소 끝이 `.gif/.webp/.mp4` 등인 항목은 받지 않습니다.
+- 파일 이름: 주소가 `<이름>.jpg/.jpeg/.png` 로 끝나고 피드 안에서 겹치지 않으면 그 이름, 아니면 `img_<URL 해시>`.
+  확장자는 받은 파일의 첫 바이트로 정합니다 (JPEG → `.jpg`, PNG → `.png`). JPEG/PNG 가 아니면(HTML 오류 페이지, WebP 등)
+  빈 `<이름>.skip` 파일을 남겨 다음 동기화 때 다시 받지 않습니다 (피드에서 빠지면 함께 지움).
+- staticflickr.com 의 1024px(`_b`) 주소는 800px(`_c`)로 바꿔 받고, 없으면 원래 주소로 받습니다.
+- 받는 중인 파일은 `.part` 로 쓰고 완료 후 이름을 바꿉니다. 피드는 512KB, 이미지는 4MB 까지만 받습니다.
+- 동기화는 자체 태스크 없이 `net_worker` 가 날씨/주가 다음에 `photo_feed_sync()` 로 실행합니다 (TLS 세션 1개 유지).
+  Wi-Fi 가 끊겨 있으면 `photo_feed_sync(false)`: 네트워크 없이 삭제된 피드의 폴더만 정리합니다.
+  바뀐 것이 있으면 `APP_EVT_REQ_PHOTO_RESCAN` → `photo_loader` 가 다시 탐색합니다.
+- 피드 목록은 NVS 키 `feeds` (줄바꿈 구분, 최대 8개 x 255자). `app_settings_t` 는 작은 스택에 자주 복사되므로 따로 둡니다.
 
-원본에서 바꾼 부분:
-
-| 원본 | 이 프로젝트 |
-|---|---|
-| `app_config` 의 `flickr_feeds` | `settings_get/set_flickr_feeds()` (NVS 키 `flickr`, 줄바꿈 구분, 최대 8개 x 255자). `app_settings_t` 는 작은 스택에 자주 복사되므로 따로 둠 |
-| 자체 `flickr` 태스크 (8KB 스택, 5초 폴링) | 태스크 없음. `net_worker` 가 날씨/주가 다음에 `app_flickr_sync()` 호출 → TLS 세션 1개 유지, 내부 RAM 8KB 절약 |
-| `app_flickr_request_sync()` | `APP_EVT_REQ_FLICKR_SYNC` 이벤트 (웹에서 피드 변경/[지금 동기화], Wi-Fi 연결 직후) |
-| `app_wifi_is_connected()` | Wi-Fi 가 끊겨 있으면 `app_flickr_sync(false)`: 네트워크 없이 삭제된 피드의 폴더만 정리 |
-| `app_photo_scan()` + `bsp_display_lock()` | 바뀐 것이 있으면 `APP_EVT_REQ_PHOTO_RESCAN` → `photo_loader` 가 다시 탐색 |
-| `bsp_*`, `BSP_SD_MOUNT_POINT` | `board_sdcard_is_mounted()`, `CONFIG_APP_PHOTO_DIR` |
-| 피드 받기 (`esp_http_client` open/read) | `net` 의 `http_get_alloc()` (이미지는 원본대로 SD 에 바로 스트리밍) |
-| 큰 배열이 스택에 (`orphans` 1.5KB 등) | PSRAM 버퍼 (net_worker 스택은 TLS 때문에 내부 RAM) |
-| GIF/BMP 도 받음 | 전자앨범이 표시할 수 있는 JPG/PNG 만 |
+v0.2.2 (`app_flickr`) 에서 업데이트할 때:
+- NVS 키 `flickr` → `feeds` 로 처음 읽을 때 옮깁니다 (`settings_get_photo_feeds`).
+- SD 폴더 `photos/flickr` → `photos/feeds` 로 첫 동기화 때 이름을 바꿉니다 (피드 해시와 Flickr 파일 이름이 같아 다시 받지 않음).
+- menuconfig `APP_FLICKR_SYNC_MIN` → `APP_FEED_SYNC_MIN` (바꿔 두었다면 다시 설정).
 
 웹 UI / API:
-- 피드 목록 추가/삭제, 동기화 상태(진행 중, 마지막 동기화 시각, 사진 수, 표시할 수 없는 사진 수, 오류), [지금 동기화] 버튼
-- `GET/POST /api/flickr` (피드 목록 + 상태), `POST /api/flickr/sync`
-- 피드를 바꾸면 바로 동기화해 새 피드는 곧 나타나고 삭제한 피드의 사진은 곧 사라집니다.
+- 피드 목록 추가/삭제, 동기화 상태(진행 중, 마지막 동기화 시각, 사진 수, 표시할 수 없는 사진 수, 건너뛴 항목 수, 오류), [지금 동기화] 버튼
+- `GET/POST /api/feeds` (피드 목록 + 상태), `POST /api/feeds/sync`
 
 **제약:** 기기 JPEG 디코더는 progressive JPEG 를 풀지 못합니다. 받은 파일의 헤더(SOF 마커)를 확인해 개수를 웹 UI 에 보여 줍니다.
-파일은 남겨 두어(다시 받지 않도록) 전자앨범이 건너뜁니다.
+파일은 남겨 두어(다시 받지 않도록) 전자앨범이 건너뜁니다. WebP/GIF/AVIF 는 지원하지 않습니다.
 전자앨범이 읽고 있는 파일은 FatFs 파일 잠금 때문에 지워지지 않고 다음 동기화 때 지워집니다.
 
 ## 2.9 단계별 구현 로드맵
@@ -235,7 +237,7 @@ net_worker(core0) ─ http_get_alloc(open-meteo) ─ cJSON 파싱 ─ app_state_
 | 5-6 | 한글 폰트 + 언어 설정 + 날씨 아이콘 (위 2.7 참고) |
 | 5-7 | 웹 UI: 브라우저에서 설정 (아래 2.8 참고) |
 | 5-8 | 웹 UI: 사진 업로드 (여러 장 동시) + 브라우저에서 자르기(crop) |
-| 5-9 | `app_flickr` 이식: 웹 UI 에 Flickr 피드(RSS 2.0) 등록 → `net_worker` 가 주기적으로 이미지를 SD 카드에 저장 → 전자앨범에 표시 (위 2.8 참고) |
+| 5-9 | `photo_feed`: 웹 UI 에 사진 RSS/Atom 피드(Flickr 등) 등록 → `net_worker` 가 주기적으로 이미지를 SD 카드에 저장 → 전자앨범에 표시 (위 2.8 참고) |
 | 6 | `ota` + GitHub Actions 릴리스 워크플로 (웹 UI 에서도 업데이트 확인/실행, 아래 2.10 참고) |
 
 ## 2.10 GitHub Release OTA (6단계, 구현됨: `components/ota`, `.github/workflows/release.yml`)
@@ -252,7 +254,7 @@ net_worker(core0) ─ http_get_alloc(open-meteo) ─ cJSON 파싱 ─ app_state_
 - `tag_name` 을 `esp_app_desc.version` 과 semver 로 비교해 새 버전이면 `APP_EVT_OTA_AVAILABLE` → 기기 팝업 (태그마다 한 번).
   웹 설정 페이지의 "펌웨어 업데이트" 카드에서도 확인/설치할 수 있습니다 (`GET /api/ota`, `POST /api/ota/check`, `POST /api/ota/install`).
 - 설치(`APP_EVT_REQ_OTA_START`)도 `net_worker` 에서 `esp_https_ota` 로 실행합니다 → TLS 세션은 여전히 하나이고 별도 태스크 스택이 필요 없습니다.
-  설치 중에는 날씨/주가/Flickr 갱신이 멈추지만 끝나면 재부팅합니다.
+  설치 중에는 날씨/주가/사진 피드 갱신이 멈추지만 끝나면 재부팅합니다.
   GitHub 은 다운로드를 서명된 긴 URL 로 리다이렉트하므로 HTTP 버퍼를 늘렸습니다 (수신 4KB / 송신 2KB).
 - 받은 이미지의 `project_name` 이 다르면 쓰기 전에 거부합니다 (다른 프로젝트 파일을 올린 경우). 칩 종류와 이미지 검증은 `esp_https_ota` 가 합니다.
 - 진행률은 `APP_EVT_OTA_PROGRESS` → 기기 팝업(웹에서 시작했으면 진행 창을 새로 띄움)과 웹 진행 막대에 표시됩니다.
@@ -260,4 +262,14 @@ net_worker(core0) ─ http_get_alloc(open-meteo) ─ cJSON 파싱 ─ app_state_
   그 전에 멈추거나 재부팅되면 부트로더가 이전 펌웨어로 되돌립니다.
 - **제약:** OTA 는 앱 파티션만 바꿉니다. LittleFS(`assets/`, 폰트)가 바뀐 릴리스는 USB 로 `storage.bin` 을 다시 써야 합니다.
   펌웨어 서명(Secure Boot)은 쓰지 않으므로 저장소에 쓰기 권한이 있는 사람이 올린 Release 를 그대로 믿습니다.
+
+## 2.11 날씨 제공자 (OpenWeatherMap / Open-Meteo)
+
+- 설정 `owm_api_key`, `weather_city` (NVS, 기기 설정 화면과 웹 설정 페이지에서 입력, 기본값은 menuconfig).
+- API 키가 있으면 OpenWeatherMap `data/2.5/weather` (units=metric): 도시가 숫자면 `id=`, 아니면 `q=이름,국가`, 비어 있으면 menuconfig 좌표.
+  응답의 날씨 코드(2xx~8xx)는 UI 아이콘/문구가 쓰는 WMO 코드로 바꾸고, 아이콘 이름의 `d`/`n` 으로 낮/밤을 정합니다.
+  도시 이름(`name`)은 날씨 카드 제목에 표시합니다 (서울 등 주요 도시는 한국어로).
+- 키가 없으면 기존처럼 Open-Meteo (키 불필요).
+- 키나 도시를 바꾸면 `net_worker` 가 바로 다시 받습니다. 결과(정상, 키 오류, 도시 없음 등)는 웹 상태 카드에 표시합니다.
+  웹은 API 키를 돌려주지 않고 설정 여부와 끝 4자리만 보여 줍니다.
 

@@ -38,7 +38,7 @@ typedef enum {
     APP_EVT_REQ_PHOTO_NEXT,
     APP_EVT_REQ_PHOTO_PREV,
     APP_EVT_REQ_PHOTO_RESCAN,    // SD 카드 사진이 추가/삭제됨 (웹 업로드, 피드 동기화) → 목록 다시 읽기
-    APP_EVT_REQ_FLICKR_SYNC,     // Flickr 피드 목록이 바뀜 / [지금 동기화] → net_worker 가 바로 동기화
+    APP_EVT_REQ_FEED_SYNC,       // 사진 피드(RSS) 목록이 바뀜 / [지금 동기화] → net_worker 가 바로 동기화
     APP_EVT_REQ_OTA_START,       // 팝업/웹에서 "업데이트" 선택 → net_worker 가 설치
     APP_EVT_REQ_OTA_CHECK,       // 웹의 [업데이트 확인] → net_worker 가 바로 확인
     APP_EVT_UI_MODE_CHANGED,     // data: ui_mode_t (app_storage.h) → 설정 저장
@@ -69,8 +69,9 @@ typedef struct {
     bool     valid;
     float    temp_c;
     int      humidity;
-    int      wmo_code;           // Open-Meteo WMO weather code → 아이콘 매핑
+    int      wmo_code;           // WMO weather code → 아이콘 매핑 (OpenWeatherMap 코드는 변환해서 넣음)
     bool     is_day;
+    char     city[48];           // OpenWeatherMap 이 알려 준 도시 이름 (Open-Meteo 는 "")
     time_t   updated_at;
 } weather_info_t;
 

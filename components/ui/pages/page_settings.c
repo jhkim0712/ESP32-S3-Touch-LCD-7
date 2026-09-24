@@ -1,6 +1,6 @@
 // 설정 페이지 (상태 표시줄의 톱니바퀴 버튼)
 //   Wi-Fi SSID(직접 입력 또는 [Scan] 목록에서 선택)/비밀번호, 연결 상태, BLE 페어링 상태/해제,
-//   화면 회전, 사진 전환 간격, 주식 종목, 웹 설정 주소/PIN, 기기 정보
+//   화면 회전, 사진 전환 간격, 날씨(OpenWeatherMap 키/도시), 주식 종목, 웹 설정 주소/PIN, 기기 정보
 // [Save] → NVS 저장 + APP_EVT_SETTINGS_CHANGED (Wi-Fi 는 새 설정으로 재연결).
 // 회전이 바뀌었으면 재부팅을 묻는다.
 
@@ -27,6 +27,8 @@ typedef struct {
     lv_obj_t *rotation;
     lv_obj_t *photo;
     lv_obj_t *symbols;
+    lv_obj_t *owm_key;
+    lv_obj_t *owm_city;
     lv_obj_t *language;
     lv_obj_t *kb;
     lv_obj_t *status;
@@ -346,6 +348,8 @@ static void on_save(lv_event_t *e)
     strlcpy(s.wifi_ssid, lv_textarea_get_text(v->ssid), sizeof(s.wifi_ssid));
     strlcpy(s.wifi_pass, lv_textarea_get_text(v->pass), sizeof(s.wifi_pass));
     strlcpy(s.stock_symbols, lv_textarea_get_text(v->symbols), sizeof(s.stock_symbols));
+    strlcpy(s.owm_api_key, lv_textarea_get_text(v->owm_key), sizeof(s.owm_api_key));
+    strlcpy(s.weather_city, lv_textarea_get_text(v->owm_city), sizeof(s.weather_city));
     s.rotation = (ui_rotation_t)lv_dropdown_get_selected(v->rotation);
     s.photo_interval_s = k_intervals[lv_dropdown_get_selected(v->photo)];
     s.language = (app_lang_t)lv_dropdown_get_selected(v->language);
@@ -468,6 +472,14 @@ void ui_settings_open(void)
     card = section(body, LV_SYMBOL_IMAGE, TR("Photo frame", "전자앨범"));
     v->photo = dropdown(row(card, TR("Interval", "전환 간격")), TR(k_interval_opts_en, k_interval_opts_ko),
                         interval_index(s.photo_interval_s));
+
+    card = section(body, LV_SYMBOL_HOME, TR("Weather", "날씨"));
+    v->owm_key = text_field(row(card, TR("API key", "API 키")), v, s.owm_api_key, sizeof(s.owm_api_key) - 1, false);
+    v->owm_city = text_field(row(card, TR("City", "도시")), v, s.weather_city, sizeof(s.weather_city) - 1, false);
+    hint(card, TR("OpenWeatherMap API key (openweathermap.org, free). City: ID (1835848 = Seoul) or name,country "
+                  "(Seoul,KR). Without a key, Open-Meteo is used for the built-in location.",
+                  "OpenWeatherMap API 키 (openweathermap.org 무료 가입). 도시: 도시 ID (1835848 = 서울) 또는 "
+                  "이름,국가 (Seoul,KR). 키가 없으면 Open-Meteo 로 기본 위치의 날씨를 받습니다."));
 
     card = section(body, LV_SYMBOL_SHUFFLE, TR("Stocks", "주식"));
     v->symbols = text_field(row(card, TR("Symbols", "종목")), v, s.stock_symbols, sizeof(s.stock_symbols) - 1, false);

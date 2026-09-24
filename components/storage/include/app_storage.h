@@ -35,19 +35,21 @@ typedef struct {
     app_lang_t    language;
     int           photo_interval_s;
     char          stock_symbols[128];
+    char          owm_api_key[48];      // OpenWeatherMap API 키. 비어 있으면 Open-Meteo(키 불필요) 사용
+    char          weather_city[64];     // OWM 도시: 도시 ID("1835848") 또는 이름("Seoul,KR"). 비면 Kconfig 좌표
 } app_settings_t;
 
 esp_err_t storage_init(void);                       // LittleFS 마운트 (실패 시 포맷)
 esp_err_t settings_load(app_settings_t *out);       // NVS 값, 없으면 Kconfig 기본값
 esp_err_t settings_save(const app_settings_t *in);
 
-// Flickr 사진 피드 URL 목록 (줄바꿈 구분). app_settings_t 와 따로 둔다: 설정 구조체는 작은 스택에
+// 사진 피드(RSS 2.0 / Atom) URL 목록 (줄바꿈 구분). app_settings_t 와 따로 둔다: 설정 구조체는 작은 스택에
 // 자주 복사되므로 크기를 키우지 않는다.
-#define SETTINGS_FLICKR_MAX_FEEDS   8
-#define SETTINGS_FLICKR_URL_MAX     256     // NUL 포함
-#define SETTINGS_FLICKR_FEEDS_LEN   (SETTINGS_FLICKR_MAX_FEEDS * SETTINGS_FLICKR_URL_MAX)
-esp_err_t settings_get_flickr_feeds(char *out, size_t size);   // 없으면 ""
-esp_err_t settings_set_flickr_feeds(const char *feeds);
+#define SETTINGS_FEED_MAX_FEEDS   8
+#define SETTINGS_FEED_URL_MAX     256     // NUL 포함
+#define SETTINGS_FEED_FEEDS_LEN   (SETTINGS_FEED_MAX_FEEDS * SETTINGS_FEED_URL_MAX)
+esp_err_t settings_get_photo_feeds(char *out, size_t size);   // 없으면 ""
+esp_err_t settings_set_photo_feeds(const char *feeds);
 
 // 웹 설정 페이지 접속 PIN (6자리 숫자). 처음 호출할 때 무작위로 만들어 NVS 에 저장한다.
 esp_err_t settings_get_web_pin(char *out, size_t size);    // size >= 7

@@ -1,18 +1,19 @@
 // 네트워크 데이터 수집 태스크 (core 0)
 // HTTPS 요청을 이 태스크 하나에서 순서대로 처리해 TLS 세션이 동시에 하나만 열리게 한다
 // (TLS 세션 하나가 내부 RAM 을 수십 KB 사용).
-//   - 날씨: CONFIG_APP_WEATHER_REFRESH_MIN 마다, 실패 시 1분 후 재시도
+//   - 날씨: CONFIG_APP_WEATHER_REFRESH_MIN 마다, 실패 시 1분 후 재시도 (API 키/도시를 바꾸면 즉시)
 //   - 주가: CONFIG_APP_STOCK_REFRESH_SEC 마다, 실패 시 30초 후 재시도
-//   - Flickr 사진 피드: CONFIG_APP_FLICKR_SYNC_MIN 마다, 실패 시 10분 후 재시도 (app_flickr_sync)
+//   - 사진 피드(RSS/Atom): CONFIG_APP_FEED_SYNC_MIN 마다, 실패 시 10분 후 재시도 (photo_feed_sync)
 //     Wi-Fi 가 끊겨 있으면 삭제된 피드의 폴더 정리만 한다.
 //   - 펌웨어 업데이트 확인: CONFIG_APP_OTA_CHECK_INTERVAL_H 마다 (연결 직후, APP_EVT_REQ_OTA_CHECK 시 즉시)
 //     설치(APP_EVT_REQ_OTA_START)는 다른 작업보다 먼저 이 태스크에서 실행한다 (끝나면 재부팅)
-//   - Wi-Fi 연결 직후, 새로고침 요청, 설정 변경(종목) 시 즉시 갱신 (Flickr 는 연결 직후와 APP_EVT_REQ_FLICKR_SYNC)
+//   - Wi-Fi 연결 직후, 새로고침 요청, 설정 변경(종목) 시 즉시 갱신 (사진 피드는 연결 직후와 APP_EVT_REQ_FEED_SYNC)
 
 #include "services.h"
 
 #include <stdlib.h>
-#include "app_flickr.h"
+#include <string.h>
+#include "photo_feed.h"
 #include "app_storage.h"
 #include "cJSON.h"
 #include "esp_check.h"
@@ -27,15 +28,15 @@
 
 #define NOTIFY_REFRESH      BIT0
 #define NOTIFY_SETTINGS     BIT1
-#define NOTIFY_FLICKR       BIT2
+#define NOTIFY_FEED       BIT2
 #define NOTIFY_OTA_CHECK    BIT3
 #define NOTIFY_OTA_INSTALL  BIT4
 #define WEATHER_RETRY_MS    (60 * 1000)
 #define STOCKS_RETRY_MS     (30 * 1000)
-#define FLICKR_RETRY_MS     (10 * 60 * 1000)
+#define FEED_RETRY_MS     (10 * 60 * 1000)
 #define OTA_RETRY_MS        (30 * 60 * 1000)
 #define OFFLINE_WAIT_MS     (60 * 60 * 1000)
-#define TASK_STACK          (12 * 1024)   // TLS 핸드셰이크(ECDHE) + Flickr 다운로드 / esp_https_ota 호출 깊이
+#define TASK_STACK          (12 * 1024)   // TLS 핸드셰이크(ECDHE) + 사진 피드 다운로드 / esp_https_ota 호출 깊이
 #define STACK_WARN_BYTES    1536
 
 static const char *TAG = "net_worker";
@@ -54,13 +55,13 @@ static void on_app_event(void *arg, esp_event_base_t base, int32_t id, void *dat
     }
     switch (id) {
     case APP_EVT_WIFI_CONNECTED:
-        xTaskNotify(s_task, NOTIFY_REFRESH | NOTIFY_FLICKR | NOTIFY_OTA_CHECK, eSetBits);
+        xTaskNotify(s_task, NOTIFY_REFRESH | NOTIFY_FEED | NOTIFY_OTA_CHECK, eSetBits);
         break;
     case APP_EVT_REQ_REFRESH:
         xTaskNotify(s_task, NOTIFY_REFRESH, eSetBits);
         break;
-    case APP_EVT_REQ_FLICKR_SYNC:
-        xTaskNotify(s_task, NOTIFY_FLICKR, eSetBits);
+    case APP_EVT_REQ_FEED_SYNC:
+        xTaskNotify(s_task, NOTIFY_FEED, eSetBits);
         break;
     case APP_EVT_SETTINGS_CHANGED:
         xTaskNotify(s_task, NOTIFY_SETTINGS, eSetBits);
@@ -94,10 +95,10 @@ static void worker(void *arg)
     configASSERT(settings && stocks);
     settings_load(settings);
 
-    int64_t next_weather = 0, next_stocks = 0, next_flickr = 0, next_ota = 0;
+    int64_t next_weather = 0, next_stocks = 0, next_feed = 0, next_ota = 0;
     for (;;) {
         int64_t next = next_weather < next_stocks ? next_weather : next_stocks;
-        next = next_flickr < next ? next_flickr : next;
+        next = next_feed < next ? next_feed : next;
         next = next_ota < next ? next_ota : next;
         int64_t wait = next - now_ms();
         if (wait < 0) {
@@ -107,15 +108,21 @@ static void worker(void *arg)
         xTaskNotifyWait(0, UINT32_MAX, &bits, pdMS_TO_TICKS(wait > 3600000 ? 3600000 : wait));
 
         if (bits & NOTIFY_SETTINGS) {
+            char old_key[sizeof(settings->owm_api_key)], old_city[sizeof(settings->weather_city)];
+            strlcpy(old_key, settings->owm_api_key, sizeof(old_key));
+            strlcpy(old_city, settings->weather_city, sizeof(old_city));
             settings_load(settings);
             next_stocks = 0;
+            if (strcmp(old_key, settings->owm_api_key) != 0 || strcmp(old_city, settings->weather_city) != 0) {
+                next_weather = 0;   // 날씨 제공자/도시가 바뀜
+            }
         }
         if (bits & NOTIFY_REFRESH) {
             next_weather = 0;
             next_stocks = 0;
         }
-        if (bits & NOTIFY_FLICKR) {
-            next_flickr = 0;
+        if (bits & NOTIFY_FEED) {
+            next_feed = 0;
         }
         if (bits & NOTIFY_OTA_CHECK) {
             next_ota = 0;
@@ -125,17 +132,17 @@ static void worker(void *arg)
             log_stack("OTA install");
         }
         if (!wifi_mgr_is_connected()) {
-            if (now_ms() >= next_flickr) {
-                app_flickr_sync(false);   // 네트워크 없이: 삭제된 피드의 사진만 정리
+            if (now_ms() >= next_feed) {
+                photo_feed_sync(false);   // 네트워크 없이: 삭제된 피드의 사진만 정리
             }
             // 연결되면 APP_EVT_WIFI_CONNECTED 로 깨어난다
-            next_weather = next_stocks = next_flickr = next_ota = now_ms() + OFFLINE_WAIT_MS;
+            next_weather = next_stocks = next_feed = next_ota = now_ms() + OFFLINE_WAIT_MS;
             continue;
         }
 
         if (now_ms() >= next_weather) {
             weather_info_t w;
-            if (weather_fetch(&w) == ESP_OK) {
+            if (weather_fetch(settings->owm_api_key, settings->weather_city, &w) == ESP_OK) {
                 app_state_set_weather(&w);
                 next_weather = now_ms() + (int64_t)CONFIG_APP_WEATHER_REFRESH_MIN * 60 * 1000;
             } else {
@@ -157,10 +164,10 @@ static void worker(void *arg)
             log_stack("OTA check");
         }
         // 날씨/주가 다음에: 처음 동기화는 사진을 여러 장 받아 1분 넘게 걸릴 수 있다
-        if (now_ms() >= next_flickr) {
-            esp_err_t err = app_flickr_sync(true);
-            next_flickr = now_ms() + (err == ESP_OK ? (int64_t)CONFIG_APP_FLICKR_SYNC_MIN * 60 * 1000 : FLICKR_RETRY_MS);
-            log_stack("Flickr sync");
+        if (now_ms() >= next_feed) {
+            esp_err_t err = photo_feed_sync(true);
+            next_feed = now_ms() + (err == ESP_OK ? (int64_t)CONFIG_APP_FEED_SYNC_MIN * 60 * 1000 : FEED_RETRY_MS);
+            log_stack("photo feed sync");
         }
     }
 }

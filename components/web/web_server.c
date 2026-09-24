@@ -25,8 +25,9 @@
 #include "freertos/event_groups.h"
 #include "mdns.h"
 #include "net.h"
+#include "services.h"
 
-#define MAX_BODY_LEN        4096   // Flickr 피드 목록 (8 x 256)
+#define MAX_BODY_LEN        4096   // 사진 피드 목록 (8 x 256)
 #define PIN_MAX_FAILS       5
 #define PIN_LOCK_US         (30 * 1000 * 1000LL)
 #define SCAN_TIMEOUT_MS     10000
@@ -197,6 +198,21 @@ static esp_err_t get_status(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "heap_internal_kb", heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024);
     cJSON_AddNumberToObject(root, "heap_psram_kb", heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024);
     cJSON_AddBoolToObject(root, "restart_required", s.rotation != s_boot_rotation);
+
+    static const char *const k_weather_status[] = { "none", "ok", "network", "bad_key", "city_not_found", "http", "parse" };
+    weather_status_t ws = weather_last_status();
+    weather_info_t w;
+    app_state_get_weather(&w);
+    cJSON *weather = cJSON_AddObjectToObject(root, "weather");
+    cJSON_AddStringToObject(weather, "provider", s.owm_api_key[0] ? "openweathermap" : "open-meteo");
+    cJSON_AddStringToObject(weather, "status", ws < sizeof(k_weather_status) / sizeof(k_weather_status[0])
+                                               ? k_weather_status[ws] : "unknown");
+    if (w.valid) {
+        cJSON_AddStringToObject(weather, "city", w.city);
+        cJSON_AddNumberToObject(weather, "temp", w.temp_c);
+        cJSON_AddNumberToObject(weather, "humidity", w.humidity);
+        cJSON_AddNumberToObject(weather, "updated_at", (double)w.updated_at);
+    }
     return web_send_json(req, root);
 }
 
@@ -217,6 +233,11 @@ static esp_err_t get_settings(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "rotation", s.rotation * 90);
     cJSON_AddNumberToObject(root, "photo_interval_s", s.photo_interval_s);
     cJSON_AddStringToObject(root, "stock_symbols", s.stock_symbols);
+    // API 키는 비밀번호처럼 돌려주지 않는다: 설정 여부와 끝 4자리만
+    size_t key_len = strlen(s.owm_api_key);
+    cJSON_AddBoolToObject(root, "owm_api_key_set", key_len > 0);
+    cJSON_AddStringToObject(root, "owm_api_key_hint", key_len >= 4 ? s.owm_api_key + key_len - 4 : "");
+    cJSON_AddStringToObject(root, "weather_city", s.weather_city);
     return web_send_json(req, root);
 }
 
@@ -253,6 +274,14 @@ static esp_err_t post_settings(httpd_req_t *req)
     if (!take_string(root, "wifi_ssid", s.wifi_ssid, sizeof(s.wifi_ssid))) bad = "wifi_ssid";
     if (!take_string(root, "wifi_pass", s.wifi_pass, sizeof(s.wifi_pass))) bad = "wifi_pass";
     if (!take_string(root, "stock_symbols", s.stock_symbols, sizeof(s.stock_symbols))) bad = "stock_symbols";
+    if (!take_string(root, "owm_api_key", s.owm_api_key, sizeof(s.owm_api_key))) bad = "owm_api_key";
+    if (!take_string(root, "weather_city", s.weather_city, sizeof(s.weather_city))) bad = "weather_city";
+    for (const char *p = s.owm_api_key; *p && !bad; p++) {
+        if (!isalnum((unsigned char)*p)) bad = "owm_api_key";   // URL 에 그대로 들어간다
+    }
+    for (const unsigned char *p = (const unsigned char *)s.weather_city; *p && !bad; p++) {
+        if (*p < 0x20) bad = "weather_city";
+    }
 
     const cJSON *item = cJSON_GetObjectItemCaseSensitive(root, "ui_mode");
     if (item) {
@@ -406,7 +435,7 @@ esp_err_t web_server_start(void)
         ESP_RETURN_ON_ERROR(httpd_register_uri_handler(s_server, &uris[i]), TAG, "uri %s", uris[i].uri);
     }
     ESP_RETURN_ON_ERROR(web_photos_register(s_server), TAG, "photos");
-    ESP_RETURN_ON_ERROR(web_flickr_register(s_server), TAG, "flickr");
+    ESP_RETURN_ON_ERROR(web_feeds_register(s_server), TAG, "feeds");
     ESP_RETURN_ON_ERROR(web_ota_register(s_server), TAG, "ota");
 
     start_mdns();

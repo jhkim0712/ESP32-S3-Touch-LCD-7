@@ -1,9 +1,17 @@
 /**
- * @file app_flickr.c
- * @brief See app_flickr.h. The feed is fetched with net's http_get_alloc();
+ * @file photo_feed.c
+ * @brief See photo_feed.h. The feed is fetched with net's http_get_alloc();
  *        images are streamed straight to the SD card with esp_http_client
  *        open/read (+ crt bundle) and manual redirect handling, which
  *        open/read - unlike esp_http_client_perform() - doesn't do on its own.
+ *
+ * File names: an image URL that ends in "<name>.jpg/.jpeg/.png" keeps that
+ * name (so Flickr's "<id>_<secret>_c.jpg" files survive the switch from the
+ * old app_flickr), unless two items of the same feed share it. Everything
+ * else - URLs without an extension, duplicates - is named "img_<url hash>".
+ * The real type always comes from the file's first bytes, so the stored
+ * extension is ".jpg" or ".png"; "<stem>.skip" marks an item whose image
+ * is neither.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,35 +29,37 @@
 #include "esp_http_client.h"
 #include "esp_crt_bundle.h"
 
-#include "app_flickr.h"
+#include "photo_feed.h"
 #include "app_state.h"
 #include "app_storage.h"
 #include "board.h"
 #include "net.h"
 
-static const char *TAG = "app_flickr";
+static const char *TAG = "photo_feed";
 
 #define PHOTOS_DIR        CONFIG_APP_PHOTO_DIR
-#define FLICKR_DIR        APP_FLICKR_DIR
+#define FEEDS_DIR         PHOTO_FEED_DIR
 
-#define FEED_MAX_LEN      (256 * 1024)          /* Flickr's 20-item feeds are well under 100KB */
+#define FEED_MAX_LEN      (512 * 1024)          /* feeds with full article HTML can be a few hundred KB */
 #define IMAGE_MAX_LEN     (4 * 1024 * 1024)     /* refuse anything absurd rather than fill the card */
 #define MAX_ITEMS         50                    /* per feed - Flickr's own feeds return 20 */
-#define URL_MAX           SETTINGS_FLICKR_URL_MAX
+#define URL_MAX           SETTINGS_FEED_URL_MAX
 #define NAME_MAX_LEN      96
-#define PATH_MAX_LEN      (sizeof(FLICKR_DIR) + 10 + NAME_MAX_LEN + 8)
+#define PATH_MAX_LEN      (sizeof(FEEDS_DIR) + 10 + NAME_MAX_LEN + 8)
 #define MAX_REDIRECTS     5
 #define IO_CHUNK          4096
 #define MAX_ORPHAN_DIRS   16
 #define USER_AGENT        "Mozilla/5.0 (ESP32-S3; SmartDisplay)"
+#define SKIP_EXT          ".skip"
 
 static SemaphoreHandle_t s_lock;
-static app_flickr_status_t s_status;
+static photo_feed_status_t s_status;
 
 /* Scratch buffers, only ever touched from net_worker - kept off its stack
  * (and in PSRAM: net_worker's stack is internal RAM, needed for TLS). */
 static char *s_feeds;
 static char (*s_urls)[URL_MAX];
+static char (*s_segs)[NAME_MAX_LEN];     /* last path segment of each URL (duplicate check) */
 static char (*s_keep)[NAME_MAX_LEN];
 static char (*s_doomed)[NAME_MAX_LEN];
 static char (*s_orphans)[NAME_MAX_LEN];
@@ -59,14 +69,16 @@ static char (*s_orphans)[NAME_MAX_LEN];
  * (they were ~1.3KB there and overflowed the stack). */
 typedef struct {
     char small_url[URL_MAX];
-    char small_name[NAME_MAX_LEN];
-    char orig_name[NAME_MAX_LEN];
-    char small_path[PATH_MAX_LEN];
-    char orig_path[PATH_MAX_LEN];
-    char part_path[PATH_MAX_LEN + 8];
+    char stem[NAME_MAX_LEN];
+    char orig_stem[NAME_MAX_LEN];
+    char found[NAME_MAX_LEN];
     char dir[PATH_MAX_LEN];
+    char path[PATH_MAX_LEN + NAME_MAX_LEN + 8];        /* dir + "/" + file name */
+    char part_path[PATH_MAX_LEN + NAME_MAX_LEN + 8];
 } scratch_t;
 static scratch_t *s_scratch;
+
+typedef enum { IMG_NONE, IMG_JPEG, IMG_PNG } img_type_t;
 
 /* ---------------------------------------------------------------------- */
 /* Small helpers                                                           */
@@ -79,35 +91,53 @@ static bool has_extension(const char *name, const char *ext)
     return name_len >= ext_len && strcasecmp(name + (name_len - ext_len), ext) == 0;
 }
 
-/* Same set photo_loader plays - anything else in a feed is skipped. */
+/* Same set photo_loader plays. */
 static bool is_image_name(const char *name)
 {
     return has_extension(name, ".jpg") || has_extension(name, ".jpeg") || has_extension(name, ".png");
 }
 
+/* Extensions that are certainly not a still JPEG/PNG - skipped without downloading. */
+static bool is_other_media_name(const char *name)
+{
+    static const char *const exts[] = { ".gif", ".webp", ".avif", ".heic", ".svg", ".bmp", ".mp3", ".m4a",
+                                        ".mp4", ".m4v", ".mov", ".webm", ".ogg", ".pdf" };
+    for (size_t i = 0; i < sizeof(exts) / sizeof(exts[0]); i++) {
+        if (has_extension(name, exts[i])) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static bool file_exists(const char *path)
 {
     struct stat st;
-    return stat(path, &st) == 0 && S_ISREG(st.st_mode) && st.st_size > 0;
+    return stat(path, &st) == 0 && S_ISREG(st.st_mode);
 }
 
-/* FNV-1a: gives every feed URL a short, stable folder name. */
-static void feed_hash(const char *url, char out[9])
+/* FNV-1a: short, stable names for feed folders and extension-less images. */
+static uint32_t fnv1a(const char *s)
 {
     uint32_t h = 2166136261u;
-    for (const char *p = url; *p; p++) {
+    for (const char *p = s; *p; p++) {
         h ^= (uint8_t)*p;
         h *= 16777619u;
     }
-    snprintf(out, 9, "%08" PRIx32, h);
+    return h;
 }
 
-/* In-place decode of the handful of entities that can show up in a URL
- * attribute (really only &amp;, but the rest cost nothing). */
+static void feed_hash(const char *url, char out[9])
+{
+    snprintf(out, 9, "%08" PRIx32, fnv1a(url));
+}
+
+/* In-place decode of the entities that show up in URLs / escaped HTML. */
 static void xml_unescape(char *s)
 {
     static const struct { const char *ent; char ch; } ents[] = {
-        {"&amp;", '&'}, {"&lt;", '<'}, {"&gt;", '>'}, {"&quot;", '"'}, {"&apos;", '\''}, {"&#38;", '&'},
+        {"&amp;", '&'}, {"&lt;", '<'}, {"&gt;", '>'}, {"&quot;", '"'}, {"&apos;", '\''},
+        {"&#38;", '&'}, {"&#34;", '"'}, {"&#39;", '\''},
     };
     char *w = s;
     for (char *r = s; *r;) {
@@ -130,10 +160,9 @@ static void xml_unescape(char *s)
     *w = '\0';
 }
 
-/* Local filename for an image URL: its last path segment (query/fragment
- * dropped), with anything FAT or a path might choke on replaced by '_'.
- * @return false if the URL has no usable name or isn't a supported image. */
-static bool url_to_name(const char *url, char *out, size_t out_len)
+/* Last path segment of a URL (query/fragment dropped), with anything FAT or a
+ * path might choke on replaced by '_'. "" if there is none. */
+static void url_segment(const char *url, char *out, size_t out_len)
 {
     const char *end = url + strcspn(url, "?#");
     const char *start = end;
@@ -141,15 +170,42 @@ static bool url_to_name(const char *url, char *out, size_t out_len)
         start--;
     }
     size_t len = (size_t)(end - start);
-    if (len == 0 || len >= out_len) {
-        return false;
+    if (len >= out_len) {
+        len = 0;
     }
     for (size_t char_i = 0; char_i < len; char_i++) {
         char c = start[char_i];
         out[char_i] = (isalnum((unsigned char)c) || c == '.' || c == '-' || c == '_') ? c : '_';
     }
     out[len] = '\0';
-    return out[0] != '.' && is_image_name(out);
+    if (out[0] == '.') {
+        out[0] = '\0';
+    }
+}
+
+/* File name stem (no extension) for an image URL - see the file comment. */
+static void image_stem(const char *url, const char *seg, bool seg_unique, char *out, size_t out_len)
+{
+    if (seg_unique && is_image_name(seg)) {
+        strlcpy(out, seg, out_len);
+        *strrchr(out, '.') = '\0';
+    } else {
+        snprintf(out, out_len, "img_%08" PRIx32, fnv1a(url));
+    }
+}
+
+/* Looks for "<dir>/<stem>.jpg/.png/.jpeg/.skip"; copies the file name found. */
+static bool find_existing(const char *dir, const char *stem, char *found, size_t found_len)
+{
+    static const char *const exts[] = { ".jpg", ".png", ".jpeg", SKIP_EXT };
+    for (size_t i = 0; i < sizeof(exts) / sizeof(exts[0]); i++) {
+        snprintf(found, found_len, "%s%s", stem, exts[i]);
+        snprintf(s_scratch->path, sizeof(s_scratch->path), "%s/%s", dir, found);
+        if (file_exists(s_scratch->path)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 /* Flickr static image URLs end in "<id>_<secret>_<size>.jpg". The feed links
@@ -236,16 +292,15 @@ static bool get_attr(const char *attrs, const char *attrs_end, const char *attr,
     return false;
 }
 
-/* Looks through every <tag ...> in [block, block_end) for attribute `attr`,
- * optionally only in tags where attribute `filter_attr` equals `filter_val`
- * (for Atom's <link rel="enclosure" href="...">). */
-static bool find_tag_attr(const char *block, const char *block_end, const char *tag, const char *attr,
-                          const char *filter_attr, const char *filter_val, char *out, size_t out_len)
+/* Looks through every <tag ...> in [block, block_end) for attribute `attr`.
+ * image_only: skip tags whose type (MIME) or medium attribute says they are
+ * not an image. enclosure_only: Atom <link>, only rel="enclosure". */
+static bool find_tag_url(const char *block, const char *block_end, const char *tag, const char *attr,
+                         bool image_only, bool enclosure_only, char *out, size_t out_len)
 {
     size_t tag_len = strlen(tag);
     for (const char *p = block; (p = strstr(p, tag)) != NULL && p < block_end; p += tag_len) {
-        char next = p[tag_len];
-        if (!isspace((unsigned char)next)) {
+        if (!isspace((unsigned char)p[tag_len])) {
             continue; /* a tag with no attributes, or just a longer tag name sharing this prefix */
         }
         const char *tag_end = strchr(p, '>');
@@ -253,9 +308,15 @@ static bool find_tag_attr(const char *block, const char *block_end, const char *
             return false;
         }
         const char *attrs = p + tag_len;
-        if (filter_attr) {
-            char value[32];
-            if (!get_attr(attrs, tag_end, filter_attr, value, sizeof(value)) || strcmp(value, filter_val) != 0) {
+        char value[32];
+        if (enclosure_only && (!get_attr(attrs, tag_end, "rel", value, sizeof(value)) || strcmp(value, "enclosure") != 0)) {
+            continue;
+        }
+        if (image_only) {
+            if (get_attr(attrs, tag_end, "type", value, sizeof(value)) && strncmp(value, "image/", 6) != 0) {
+                continue;
+            }
+            if (get_attr(attrs, tag_end, "medium", value, sizeof(value)) && strcmp(value, "image") != 0) {
                 continue;
             }
         }
@@ -266,10 +327,72 @@ static bool find_tag_attr(const char *block, const char *block_end, const char *
     return false;
 }
 
-/* Extracts each item's image URL from an RSS 2.0 (<item>) or Atom (<entry>)
- * feed. Flickr puts it in <media:content url>, and also in <enclosure url>
- * (RSS) or <link rel="enclosure" href> (Atom) - any of the three will do,
- * which also covers non-Flickr photo feeds shaped the same way.
+/* First <img src> in entity-escaped HTML: "&lt;img ... src=&quot;URL&quot; ...&gt;"
+ * (or src="URL" / src='URL'). The value is unescaped twice, since URLs in
+ * escaped HTML carry "&amp;amp;". */
+static bool find_escaped_img(const char *block, const char *block_end, char *out, size_t out_len)
+{
+    for (const char *p = block; (p = strstr(p, "&lt;img")) != NULL && p < block_end; p += 7) {
+        const char *tag_end = strstr(p, "&gt;");
+        if (!tag_end || tag_end > block_end) {
+            return false;
+        }
+        const char *src = strstr(p, "src=");
+        if (!src || src > tag_end) {
+            continue;
+        }
+        src += 4;
+        const char *delim;
+        size_t delim_len;
+        if (strncmp(src, "&quot;", 6) == 0) {
+            delim = "&quot;", delim_len = 6;
+        } else if (*src == '"' || *src == '\'') {
+            delim = *src == '"' ? "\"" : "'", delim_len = 1;
+        } else {
+            continue;
+        }
+        const char *value = src + delim_len;
+        const char *value_end = strstr(value, delim);
+        if (!value_end || value_end > tag_end || (size_t)(value_end - value) >= out_len) {
+            continue;
+        }
+        memcpy(out, value, (size_t)(value_end - value));
+        out[value_end - value] = '\0';
+        xml_unescape(out);
+        xml_unescape(out);
+        return true;
+    }
+    return false;
+}
+
+static bool is_http_url(const char *url)
+{
+    return strncmp(url, "https://", 8) == 0 || strncmp(url, "http://", 7) == 0;
+}
+
+/* Picks one image URL out of an <item>/<entry> block (see photo_feed.h). */
+static bool item_image_url(const char *start, const char *end, char *url, size_t url_len)
+{
+    if (find_tag_url(start, end, "<media:content", "url", true, false, url, url_len) && is_http_url(url)) {
+        return true;
+    }
+    if (find_tag_url(start, end, "<enclosure", "url", true, false, url, url_len) && is_http_url(url)) {
+        return true;
+    }
+    if (find_tag_url(start, end, "<link", "href", true, true, url, url_len) && is_http_url(url)) {
+        return true;
+    }
+    if (find_tag_url(start, end, "<media:thumbnail", "url", false, false, url, url_len) && is_http_url(url)) {
+        return true;
+    }
+    /* HTML body: raw inside CDATA, or entity-escaped */
+    if (find_tag_url(start, end, "<img", "src", false, false, url, url_len) && is_http_url(url)) {
+        return true;
+    }
+    return find_escaped_img(start, end, url, url_len) && is_http_url(url);
+}
+
+/* Extracts each item's image URL from an RSS 2.0 (<item>) or Atom (<entry>) feed.
  * @return number of distinct image URLs written to urls[]. */
 static size_t parse_feed(const char *doc, char (*urls)[URL_MAX], size_t max_urls)
 {
@@ -293,23 +416,23 @@ static size_t parse_feed(const char *doc, char (*urls)[URL_MAX], size_t max_urls
         if (!end) {
             break; /* truncated feed - stop at the last complete item */
         }
+        p = end + strlen(close_tag);
 
         char *url = urls[count];
-        bool found = find_tag_attr(start, end, "<media:content", "url", NULL, NULL, url, URL_MAX) ||
-                     find_tag_attr(start, end, "<enclosure", "url", NULL, NULL, url, URL_MAX) ||
-                     find_tag_attr(start, end, "<link", "href", "rel", "enclosure", url, URL_MAX);
-        char name[NAME_MAX_LEN];
-        if (found && (strncmp(url, "https://", 8) == 0 || strncmp(url, "http://", 7) == 0) &&
-            url_to_name(url, name, sizeof(name))) {
-            bool dup = false;
-            for (size_t url_i = 0; url_i < count && !dup; url_i++) {
-                dup = strcmp(urls[url_i], url) == 0;
-            }
-            if (!dup) {
-                count++;
-            }
+        if (!item_image_url(start, end, url, URL_MAX)) {
+            continue;
         }
-        p = end + strlen(close_tag);
+        url_segment(url, s_segs[count], NAME_MAX_LEN);
+        if (is_other_media_name(s_segs[count])) {
+            continue; /* GIF, WebP, video... */
+        }
+        bool dup = false;
+        for (size_t url_i = 0; url_i < count && !dup; url_i++) {
+            dup = strcmp(urls[url_i], url) == 0;
+        }
+        if (!dup) {
+            count++;
+        }
     }
     return count;
 }
@@ -328,8 +451,8 @@ static esp_http_client_handle_t http_open(const char *url, int *out_status)
         .url = url,
         .crt_bundle_attach = esp_crt_bundle_attach,
         .timeout_ms = 15000,
-        /* Flickr's CDN sends some long header lines (CSP, cookies) - the
-         * 512-byte default buffers are too tight for them. */
+        /* CDNs send some long header lines (CSP, cookies) - the 512-byte
+         * default buffers are too tight for them. */
         .buffer_size = 2048,
         .buffer_size_tx = 1024,
         .user_agent = USER_AGENT,
@@ -388,14 +511,27 @@ static esp_err_t fetch_feed(const char *url, char **out_doc, const char **out_er
     return ESP_OK;
 }
 
-/* Streams `url` into `path`, via a ".part" file that's only renamed into
- * place once the whole body has arrived - so the photo frame never sees (or
- * tries to decode) a half-written image, and a download interrupted by a
- * power cut is just retried next sync. */
-static esp_err_t download_to_file(const char *url, const char *path)
+static img_type_t sniff_image(const uint8_t *buf, int len)
+{
+    if (len >= 3 && buf[0] == 0xFF && buf[1] == 0xD8 && buf[2] == 0xFF) {
+        return IMG_JPEG;
+    }
+    if (len >= 8 && memcmp(buf, "\x89PNG\r\n\x1a\n", 8) == 0) {
+        return IMG_PNG;
+    }
+    return IMG_NONE;
+}
+
+/* Streams `url` into "<dir>/<stem>.jpg|.png" (type from the first bytes),
+ * via a ".part" file that's only renamed into place once the whole body has
+ * arrived - so the photo frame never sees (or tries to decode) a half-written
+ * image, and a download interrupted by a power cut is just retried next sync.
+ * Not an image: writes "<stem>.skip" instead and returns ESP_ERR_NOT_SUPPORTED.
+ * The file name used is copied to out_name. */
+static esp_err_t download_to_file(const char *url, const char *dir, const char *stem, char *out_name, size_t name_len)
 {
     char *part_path = s_scratch->part_path;
-    snprintf(part_path, sizeof(s_scratch->part_path), "%s.part", path);
+    snprintf(part_path, sizeof(s_scratch->part_path), "%s/%s.part", dir, stem);
 
     int status = 0;
     esp_http_client_handle_t client = http_open(url, &status);
@@ -422,6 +558,7 @@ static esp_err_t download_to_file(const char *url, const char *path)
     }
 
     bool ok = true;
+    img_type_t type = IMG_NONE;
     int total = 0;
     for (;;) {
         int r = esp_http_client_read(client, (char *)buf, IO_CHUNK);
@@ -432,6 +569,12 @@ static esp_err_t download_to_file(const char *url, const char *path)
         if (r == 0) {
             break;
         }
+        if (total == 0) {
+            type = sniff_image(buf, r);
+            if (type == IMG_NONE) {
+                break; /* HTML page, WebP, GIF... - no need to read the rest */
+            }
+        }
         total += r;
         if (total > IMAGE_MAX_LEN || fwrite(buf, 1, (size_t)r, f) != (size_t)r) {
             ok = false;
@@ -440,19 +583,32 @@ static esp_err_t download_to_file(const char *url, const char *path)
     }
     /* read() also returns 0 on a timeout mid-body - only trust it as "done"
      * if the client agrees the whole response actually arrived. */
-    ok = ok && total > 0 && esp_http_client_is_complete_data_received(client);
+    ok = ok && (type == IMG_NONE || (total > 0 && esp_http_client_is_complete_data_received(client)));
     free(buf);
     if (fclose(f) != 0) {
         ok = false;
     }
     http_done(client);
 
-    if (!ok || rename(part_path, path) != 0) {
+    if (ok && type == IMG_NONE) {
+        remove(part_path);
+        snprintf(out_name, name_len, "%s%s", stem, SKIP_EXT);
+        snprintf(s_scratch->path, sizeof(s_scratch->path), "%s/%s", dir, out_name);
+        FILE *marker = fopen(s_scratch->path, "wb");   /* empty marker: don't fetch it again */
+        if (marker) {
+            fclose(marker);
+        }
+        ESP_LOGI(TAG, "%s is not a JPEG/PNG image, skipped", url);
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+    snprintf(out_name, name_len, "%s%s", stem, type == IMG_PNG ? ".png" : ".jpg");
+    snprintf(s_scratch->path, sizeof(s_scratch->path), "%s/%s", dir, out_name);
+    if (!ok || rename(part_path, s_scratch->path) != 0) {
         ESP_LOGW(TAG, "Download of %s failed (%d bytes received)", url, total);
         remove(part_path);
         return ESP_FAIL;
     }
-    ESP_LOGI(TAG, "Downloaded %s (%d bytes)", path, total);
+    ESP_LOGI(TAG, "Downloaded %s (%d bytes)", s_scratch->path, total);
     return ESP_OK;
 }
 
@@ -463,18 +619,18 @@ static esp_err_t download_to_file(const char *url, const char *path)
 static bool in_list(const char *name, char (*list)[NAME_MAX_LEN], size_t count)
 {
     for (size_t list_i = 0; list_i < count; list_i++) {
-        if (strcmp(list[list_i], name) == 0) {
+        if (strcasecmp(list[list_i], name) == 0) {
             return true;
         }
     }
     return false;
 }
 
-/* Deletes every image (and leftover ".part" file) in `dir` that isn't in
- * keep[] - pass keep_count 0 to empty it entirely. Names are collected
- * first and deleted after closedir(), rather than unlinked mid-readdir().
- * A file the photo frame is reading right now can't be deleted (FatFs file
- * lock) - it just goes on the next sync.
+/* Deletes every image, ".skip" marker and leftover ".part" file in `dir`
+ * that isn't in keep[] - pass keep_count 0 to empty it entirely. Names are
+ * collected first and deleted after closedir(), rather than unlinked
+ * mid-readdir(). A file the photo frame is reading right now can't be
+ * deleted (FatFs file lock) - it just goes on the next sync.
  * @return number of files deleted. */
 static int prune_dir(const char *dir, char (*keep)[NAME_MAX_LEN], size_t keep_count)
 {
@@ -493,7 +649,8 @@ static int prune_dir(const char *dir, char (*keep)[NAME_MAX_LEN], size_t keep_co
             if (entry->d_type == DT_DIR || strlen(entry->d_name) >= NAME_MAX_LEN) {
                 continue;
             }
-            if (!is_image_name(entry->d_name) && !has_extension(entry->d_name, ".part")) {
+            if (!is_image_name(entry->d_name) && !has_extension(entry->d_name, ".part") &&
+                !has_extension(entry->d_name, SKIP_EXT)) {
                 continue;
             }
             if (!in_list(entry->d_name, keep, keep_count)) {
@@ -534,19 +691,18 @@ static int count_images(const char *dir)
 }
 
 /* Removes the folders of feeds that are no longer configured.
- * @return number of image files deleted along with them. */
+ * @return number of files deleted along with them. */
 static int prune_removed_feeds(char (*hashes)[9], size_t hash_count)
 {
     size_t orphan_count = 0;
 
-    DIR *d = opendir(FLICKR_DIR);
+    DIR *d = opendir(FEEDS_DIR);
     if (!d) {
         return 0;
     }
     struct dirent *entry;
     while ((entry = readdir(d)) != NULL && orphan_count < MAX_ORPHAN_DIRS) {
-        if (entry->d_type != DT_DIR || strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0 ||
-            strlen(entry->d_name) >= NAME_MAX_LEN) {
+        if (entry->d_type != DT_DIR || entry->d_name[0] == '.' || strlen(entry->d_name) >= NAME_MAX_LEN) {
             continue;
         }
         bool configured = false;
@@ -562,7 +718,7 @@ static int prune_removed_feeds(char (*hashes)[9], size_t hash_count)
     int removed = 0;
     for (size_t orphan_i = 0; orphan_i < orphan_count; orphan_i++) {
         char path[PATH_MAX_LEN];
-        snprintf(path, sizeof(path), "%s/%s", FLICKR_DIR, s_orphans[orphan_i]);
+        snprintf(path, sizeof(path), "%s/%s", FEEDS_DIR, s_orphans[orphan_i]);
         removed += prune_dir(path, NULL, 0);
         rmdir(path); /* best-effort: stays behind if something else was put in it (retried next sync) */
         ESP_LOGI(TAG, "Removed folder of deleted feed: %s", path);
@@ -570,20 +726,65 @@ static int prune_removed_feeds(char (*hashes)[9], size_t hash_count)
     return removed;
 }
 
+/* Up to v0.2.2 (app_flickr) the mirror lived in photos/flickr. Renaming the
+ * folder keeps the downloaded images (same feed hashes, same file names). */
+static void migrate_old_dir(void)
+{
+    static bool s_done;
+    if (s_done) {
+        return;
+    }
+    s_done = true;
+    struct stat st;
+    if (stat(PHOTO_FEED_OLD_DIR, &st) != 0 || !S_ISDIR(st.st_mode)) {
+        return;
+    }
+    if (stat(FEEDS_DIR, &st) == 0) {
+        ESP_LOGW(TAG, "Both %s and %s exist - leaving the old folder alone", PHOTO_FEED_OLD_DIR, FEEDS_DIR);
+        return;
+    }
+    if (rename(PHOTO_FEED_OLD_DIR, FEEDS_DIR) == 0) {
+        ESP_LOGI(TAG, "Moved %s to %s", PHOTO_FEED_OLD_DIR, FEEDS_DIR);
+        app_event_post(APP_EVT_REQ_PHOTO_RESCAN, NULL, 0);
+    } else {
+        ESP_LOGW(TAG, "Could not rename %s to %s", PHOTO_FEED_OLD_DIR, FEEDS_DIR);
+    }
+}
+
 /* ---------------------------------------------------------------------- */
 /* Sync                                                                    */
 /* ---------------------------------------------------------------------- */
+
+typedef struct {
+    int  images;
+    int  unsupported;
+    int  skipped;
+    bool changed;
+} sync_counts_t;
+
+/* Counts a kept file into the totals. */
+static void count_kept(const char *dir, const char *name, sync_counts_t *io)
+{
+    if (has_extension(name, SKIP_EXT)) {
+        io->skipped++;
+        return;
+    }
+    io->images++;
+    snprintf(s_scratch->path, sizeof(s_scratch->path), "%s/%s", dir, name);
+    if (jpeg_is_progressive(s_scratch->path)) {
+        io->unsupported++;
+    }
+}
 
 /* Brings `dir` in line with the feed at `feed_url`: downloads new images,
  * deletes ones that left the feed. Leaves the folder untouched if the feed
  * itself can't be read, so a network hiccup doesn't wipe the album.
  * @return ESP_OK if the feed and every image in it were fetched. */
-static esp_err_t sync_feed(const char *feed_url, const char *dir, int *io_images, int *io_unsupported,
-                           bool *io_changed, const char **out_error)
+static esp_err_t sync_feed(const char *feed_url, const char *dir, sync_counts_t *io, const char **out_error)
 {
     char *doc = NULL;
     if (fetch_feed(feed_url, &doc, out_error) != ESP_OK) {
-        *io_images += count_images(dir);
+        io->images += count_images(dir);
         return ESP_FAIL;
     }
     size_t url_count = parse_feed(doc, s_urls, MAX_ITEMS);
@@ -591,7 +792,7 @@ static esp_err_t sync_feed(const char *feed_url, const char *dir, int *io_images
     if (url_count == 0) {
         ESP_LOGW(TAG, "No images found in feed %s", feed_url);
         *out_error = "no_images_in_feed";
-        *io_images += count_images(dir);
+        io->images += count_images(dir);
         return ESP_FAIL;
     }
 
@@ -601,52 +802,48 @@ static esp_err_t sync_feed(const char *feed_url, const char *dir, int *io_images
     int failures = 0;
     for (size_t url_i = 0; url_i < url_count; url_i++) {
         const char *orig_url = s_urls[url_i];
+        bool unique = true;
+        for (size_t other = 0; other < url_count && unique; other++) {
+            unique = other == url_i || strcasecmp(s_segs[other], s_segs[url_i]) != 0;
+        }
+
         char *small_url = s_scratch->small_url;
         strcpy(small_url, orig_url);
         prefer_800px(small_url);
+        bool has_small = strcmp(small_url, orig_url) != 0;
 
-        char *small_name = s_scratch->small_name;
-        char *orig_name = s_scratch->orig_name;
-        url_to_name(small_url, small_name, NAME_MAX_LEN);
-        url_to_name(orig_url, orig_name, NAME_MAX_LEN);
-        bool has_small = strcmp(small_name, orig_name) != 0;
+        char *stem = s_scratch->stem;
+        char *orig_stem = s_scratch->orig_stem;
+        char seg[NAME_MAX_LEN];
+        url_segment(small_url, seg, sizeof(seg));
+        image_stem(small_url, seg, unique, stem, NAME_MAX_LEN);
+        image_stem(orig_url, s_segs[url_i], unique, orig_stem, NAME_MAX_LEN);
 
-        char *small_path = s_scratch->small_path;
-        char *orig_path = s_scratch->orig_path;
-        if (snprintf(small_path, PATH_MAX_LEN, "%s/%s", dir, small_name) >= (int)PATH_MAX_LEN ||
-            snprintf(orig_path, PATH_MAX_LEN, "%s/%s", dir, orig_name) >= (int)PATH_MAX_LEN) {
-            failures++;
-            continue;
-        }
-
-        const char *kept = NULL;
-        const char *kept_path = NULL;
-        if (file_exists(small_path)) {
-            kept = small_name, kept_path = small_path;
-        } else if (has_small && file_exists(orig_path)) {
-            kept = orig_name, kept_path = orig_path;
-        } else if (download_to_file(small_url, small_path) == ESP_OK) {
-            kept = small_name, kept_path = small_path;
-            *io_changed = true;
-        } else if (has_small && download_to_file(orig_url, orig_path) == ESP_OK) {
-            kept = orig_name, kept_path = orig_path;
-            *io_changed = true;
+        char *found = s_scratch->found;
+        bool kept = false;
+        if (find_existing(dir, stem, found, NAME_MAX_LEN) ||
+            (has_small && find_existing(dir, orig_stem, found, NAME_MAX_LEN))) {
+            kept = true;
+        } else {
+            esp_err_t err = download_to_file(small_url, dir, stem, found, NAME_MAX_LEN);
+            if ((err == ESP_FAIL || err == ESP_ERR_NOT_FOUND) && has_small) {
+                err = download_to_file(orig_url, dir, orig_stem, found, NAME_MAX_LEN);
+            }
+            kept = err == ESP_OK || err == ESP_ERR_NOT_SUPPORTED;   /* not an image: the .skip marker */
+            io->changed |= err == ESP_OK;
         }
 
         if (kept) {
-            strcpy(s_keep[keep_count++], kept);
-            if (jpeg_is_progressive(kept_path)) {
-                (*io_unsupported)++;
-            }
+            strlcpy(s_keep[keep_count++], found, NAME_MAX_LEN);
+            count_kept(dir, found, io);
         } else {
             failures++;
         }
     }
 
     if (prune_dir(dir, s_keep, keep_count) > 0) {
-        *io_changed = true;
+        io->changed = true;
     }
-    *io_images += (int)keep_count;
 
     if (failures > 0) {
         *out_error = "some_images_failed";
@@ -662,7 +859,7 @@ static void set_syncing(bool syncing)
     xSemaphoreGive(s_lock);
 }
 
-esp_err_t app_flickr_sync(bool online)
+esp_err_t photo_feed_sync(bool online)
 {
     if (!s_lock) {
         return ESP_ERR_INVALID_STATE;
@@ -670,56 +867,56 @@ esp_err_t app_flickr_sync(bool online)
     if (!board_sdcard_is_mounted()) {
         return ESP_ERR_INVALID_STATE;
     }
+    migrate_old_dir();
+
     /* Snapshot the list: the web UI may save a new one during the (slow) sync. */
-    settings_get_flickr_feeds(s_feeds, SETTINGS_FLICKR_FEEDS_LEN);
+    settings_get_photo_feeds(s_feeds, SETTINGS_FEED_FEEDS_LEN);
     if (online && s_feeds[0] == '\0') {
         online = false; /* nothing to download - just clean up */
     }
 
     set_syncing(true);
     struct stat st;
-    if (stat(FLICKR_DIR, &st) != 0) {
+    if (stat(FEEDS_DIR, &st) != 0) {
         if (s_feeds[0] == '\0') {
             set_syncing(false);
             return ESP_OK; /* never used */
         }
         mkdir(PHOTOS_DIR, 0775);
-        mkdir(FLICKR_DIR, 0775);
+        mkdir(FEEDS_DIR, 0775);
     }
 
-    char hashes[SETTINGS_FLICKR_MAX_FEEDS][9];
+    char hashes[SETTINGS_FEED_MAX_FEEDS][9];
     size_t feed_count = 0;
-    int images = 0;
-    int unsupported = 0;
-    bool changed = false;
-    char error[APP_FLICKR_ERROR_MAX] = "";
+    sync_counts_t counts = { 0 };
+    char error[PHOTO_FEED_ERROR_MAX] = "";
 
     char *save = NULL;
-    for (char *url = strtok_r(s_feeds, "\n", &save); url && feed_count < SETTINGS_FLICKR_MAX_FEEDS;
+    for (char *url = strtok_r(s_feeds, "\n", &save); url && feed_count < SETTINGS_FEED_MAX_FEEDS;
          url = strtok_r(NULL, "\n", &save)) {
         if (url[0] == '\0') {
             continue;
         }
         feed_hash(url, hashes[feed_count]);
         char *dir = s_scratch->dir;
-        snprintf(dir, sizeof(s_scratch->dir), "%s/%s", FLICKR_DIR, hashes[feed_count]);
+        snprintf(dir, sizeof(s_scratch->dir), "%s/%s", FEEDS_DIR, hashes[feed_count]);
         feed_count++;
 
         if (!online) {
-            images += count_images(dir);
+            counts.images += count_images(dir);
             continue;
         }
         const char *feed_error = NULL;
         ESP_LOGI(TAG, "Syncing feed %u: %s", (unsigned)feed_count, url);
-        if (sync_feed(url, dir, &images, &unsupported, &changed, &feed_error) != ESP_OK && error[0] == '\0') {
+        if (sync_feed(url, dir, &counts, &feed_error) != ESP_OK && error[0] == '\0') {
             snprintf(error, sizeof(error), "feed %u: %s", (unsigned)feed_count, feed_error);
         }
     }
 
     if (prune_removed_feeds(hashes, feed_count) > 0) {
-        changed = true;
+        counts.changed = true;
     }
-    if (changed) {
+    if (counts.changed) {
         app_event_post(APP_EVT_REQ_PHOTO_RESCAN, NULL, 0);
     }
 
@@ -729,13 +926,14 @@ esp_err_t app_flickr_sync(bool online)
         s_status.have_error = error[0] != '\0';
         strlcpy(s_status.error, error, sizeof(s_status.error));
         s_status.last_sync = time(NULL);
-        s_status.unsupported = unsupported;
+        s_status.unsupported = counts.unsupported;
+        s_status.skipped = counts.skipped;
     }
-    s_status.image_count = images;
+    s_status.image_count = counts.images;
     xSemaphoreGive(s_lock);
 
-    ESP_LOGI(TAG, "Sync done%s: %u feed(s), %d image(s), %d progressive%s%s", online ? "" : " (offline)",
-             (unsigned)feed_count, images, unsupported, error[0] ? ", error: " : "", error);
+    ESP_LOGI(TAG, "Sync done%s: %u feed(s), %d image(s), %d progressive, %d skipped%s%s", online ? "" : " (offline)",
+             (unsigned)feed_count, counts.images, counts.unsupported, counts.skipped, error[0] ? ", error: " : "", error);
     return error[0] ? ESP_FAIL : ESP_OK;
 }
 
@@ -743,31 +941,32 @@ esp_err_t app_flickr_sync(bool online)
 /* Public API                                                              */
 /* ---------------------------------------------------------------------- */
 
-esp_err_t app_flickr_init(void)
+esp_err_t photo_feed_init(void)
 {
     const uint32_t caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
     s_lock = xSemaphoreCreateMutex();
-    s_feeds = heap_caps_malloc(SETTINGS_FLICKR_FEEDS_LEN, caps);
+    s_feeds = heap_caps_malloc(SETTINGS_FEED_FEEDS_LEN, caps);
     s_urls = heap_caps_malloc(MAX_ITEMS * sizeof(*s_urls), caps);
+    s_segs = heap_caps_malloc(MAX_ITEMS * sizeof(*s_segs), caps);
     s_keep = heap_caps_malloc(MAX_ITEMS * sizeof(*s_keep), caps);
     s_doomed = heap_caps_malloc(MAX_ITEMS * sizeof(*s_doomed), caps);
     s_orphans = heap_caps_malloc(MAX_ORPHAN_DIRS * sizeof(*s_orphans), caps);
     s_scratch = heap_caps_malloc(sizeof(*s_scratch), caps);
-    if (!s_lock || !s_feeds || !s_urls || !s_keep || !s_doomed || !s_orphans || !s_scratch) {
+    if (!s_lock || !s_feeds || !s_urls || !s_segs || !s_keep || !s_doomed || !s_orphans || !s_scratch) {
         return ESP_ERR_NO_MEM;
     }
     memset(&s_status, 0, sizeof(s_status));
     return ESP_OK;
 }
 
-bool app_flickr_has_feeds(void)
+bool photo_feed_has_feeds(void)
 {
     char first[2];
     /* nvs_get_str fails with "too small" when a longer list exists - that also counts */
-    return settings_get_flickr_feeds(first, sizeof(first)) != ESP_OK || first[0] != '\0';
+    return settings_get_photo_feeds(first, sizeof(first)) != ESP_OK || first[0] != '\0';
 }
 
-void app_flickr_get_status(app_flickr_status_t *out)
+void photo_feed_get_status(photo_feed_status_t *out)
 {
     if (!s_lock) {
         memset(out, 0, sizeof(*out));
