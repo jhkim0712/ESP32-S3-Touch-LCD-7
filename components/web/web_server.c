@@ -391,7 +391,7 @@ esp_err_t web_server_start(void)
     cfg.stack_size = 6144;          // NVS/SD 쓰기가 있어 내부 RAM 스택 (PSRAM 스택 불가)
     cfg.max_open_sockets = 3;       // 소켓당 내부 RAM 을 쓰므로 작게. 넘치면 오래된 연결을 닫는다
     cfg.lru_purge_enable = true;
-    cfg.max_uri_handlers = 16;
+    cfg.max_uri_handlers = 20;
     ESP_RETURN_ON_ERROR(httpd_start(&s_server, &cfg), TAG, "httpd start");
 
     static const httpd_uri_t uris[] = {
@@ -407,6 +407,7 @@ esp_err_t web_server_start(void)
     }
     ESP_RETURN_ON_ERROR(web_photos_register(s_server), TAG, "photos");
     ESP_RETURN_ON_ERROR(web_flickr_register(s_server), TAG, "flickr");
+    ESP_RETURN_ON_ERROR(web_ota_register(s_server), TAG, "ota");
 
     start_mdns();
     ESP_LOGI(TAG, "web settings at http://%s.local (port 80)", WEB_HOSTNAME);

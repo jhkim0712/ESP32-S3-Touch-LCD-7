@@ -1,0 +1,40 @@
+# Push a version tag (e.g. v0.2.0) -> build with ESP-IDF -> GitHub Release.
+# Devices check releases/latest and install the smart_display.bin asset (OTA).
+# The other files are for flashing a new board over USB (see README).
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # esp_app_desc.version (compared by the OTA check) comes from version.txt
+      - name: Set firmware version from tag
+        run: echo "${GITHUB_REF_NAME#v}" > version.txt
+
+      - name: Build
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v6.1
+          target: esp32s3
+          path: .
+
+      - name: Collect release files
+        run: |
+          mkdir dist
+          cp build/smart_display.bin build/storage.bin build/ota_data_initial.bin dist/
+          cp build/bootloader/bootloader.bin build/partition_table/partition-table.bin dist/
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

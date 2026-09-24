@@ -12,6 +12,7 @@
 //   POST /api/restart     재부팅
 //   /api/photos/...       전자앨범 사진 목록/업로드/삭제 (web_photos.c)
 //   /api/flickr[/sync]    Flickr 사진 피드 목록/상태/동기화 (web_flickr.c)
+//   /api/ota[/check|/install]  펌웨어 업데이트 확인/설치 (web_ota.c)
 #pragma once
 
 #include "esp_err.h"

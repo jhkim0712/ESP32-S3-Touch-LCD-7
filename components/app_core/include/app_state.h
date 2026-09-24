@@ -26,7 +26,7 @@ typedef enum {
     APP_EVT_MEDIA_UPDATED,       // 곡 정보/재생 상태 변경
     APP_EVT_BLE_STATE,           // data: ble_state_t (media_ble.h)
     APP_EVT_PHOTO_READY,         // data: const photo_frame_t * (photo.h)
-    APP_EVT_OTA_AVAILABLE,       // data: ota_release_t (ota.h) → 팝업
+    APP_EVT_OTA_AVAILABLE,       // data: ota_release_t (ota.h) → 팝업 (태그마다 한 번)
     APP_EVT_OTA_PROGRESS,        // data: int 0..100
     APP_EVT_OTA_DONE,            // data: esp_err_t
 
@@ -39,7 +39,8 @@ typedef enum {
     APP_EVT_REQ_PHOTO_PREV,
     APP_EVT_REQ_PHOTO_RESCAN,    // SD 카드 사진이 추가/삭제됨 (웹 업로드, 피드 동기화) → 목록 다시 읽기
     APP_EVT_REQ_FLICKR_SYNC,     // Flickr 피드 목록이 바뀜 / [지금 동기화] → net_worker 가 바로 동기화
-    APP_EVT_REQ_OTA_START,       // 팝업에서 "업데이트" 선택
+    APP_EVT_REQ_OTA_START,       // 팝업/웹에서 "업데이트" 선택 → net_worker 가 설치
+    APP_EVT_REQ_OTA_CHECK,       // 웹의 [업데이트 확인] → net_worker 가 바로 확인
     APP_EVT_UI_MODE_CHANGED,     // data: ui_mode_t (app_storage.h) → 설정 저장
     APP_EVT_SETTINGS_CHANGED,    // 설정 저장됨 → 서비스가 settings_load() 로 다시 읽음
                                  // data: app_settings_src_t (없으면 기기 설정 페이지)

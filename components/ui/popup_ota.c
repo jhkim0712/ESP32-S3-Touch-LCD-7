@@ -1,5 +1,6 @@
 // OTA 업데이트 팝업: 새 버전 알림 → [나중에] / [업데이트] → 진행률 → 결과
-// 실제 다운로드/설치는 ota 컴포넌트(6단계)가 APP_EVT_REQ_OTA_START 를 받아 수행한다.
+// 실제 다운로드/설치는 net_worker 가 APP_EVT_REQ_OTA_START 를 받아 ota_install() 로 수행한다.
+// 웹 설정 페이지에서 설치를 시작하면 첫 진행률 이벤트에서 진행 상황 창을 연다.
 
 #include "ui_internal.h"
 
@@ -24,7 +25,8 @@ static void on_close(lv_event_t *e)
     }
 }
 
-static void on_update(lv_event_t *e)
+// 버튼을 숨기고 진행 막대를 붙인다
+static void show_progress(void)
 {
     lv_obj_t *footer = lv_msgbox_get_footer(s_mbox);
     if (footer) {
@@ -35,6 +37,11 @@ static void on_update(lv_event_t *e)
     lv_obj_set_size(s_bar, LV_PCT(100), 14);
     lv_bar_set_range(s_bar, 0, 100);
     s_status = ui_label(content, UI_FONT_S, UI_COLOR_DIM, TR("Downloading...", "다운로드 중..."));
+}
+
+static void on_update(lv_event_t *e)
+{
+    show_progress();
     app_event_post(APP_EVT_REQ_OTA_START, NULL, 0);
 }
 
@@ -57,6 +64,16 @@ void ui_ota_popup_show(const ota_release_t *rel)
 
 void ui_ota_popup_progress(int percent)
 {
+    if (!s_mbox) {
+        // 웹 설정 페이지에서 설치를 시작한 경우: 진행 상황만 보여 주는 창
+        s_mbox = lv_msgbox_create(NULL);
+        lv_obj_set_width(s_mbox, ui_is_portrait() ? LV_PCT(90) : 560);
+        lv_obj_add_event_cb(s_mbox, on_deleted, LV_EVENT_DELETE, NULL);
+        lv_msgbox_add_title(s_mbox, TR(LV_SYMBOL_DOWNLOAD "  Updating firmware", LV_SYMBOL_DOWNLOAD "  펌웨어 업데이트 중"));
+    }
+    if (!s_bar) {
+        show_progress();
+    }
     if (s_bar) {
         lv_bar_set_value(s_bar, percent, LV_ANIM_ON);
         lv_label_set_text_fmt(s_status, TR("Downloading... %d%%", "다운로드 중... %d%%"), percent);

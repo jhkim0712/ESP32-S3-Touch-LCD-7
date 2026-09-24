@@ -5,6 +5,8 @@
 //   - 주가: CONFIG_APP_STOCK_REFRESH_SEC 마다, 실패 시 30초 후 재시도
 //   - Flickr 사진 피드: CONFIG_APP_FLICKR_SYNC_MIN 마다, 실패 시 10분 후 재시도 (app_flickr_sync)
 //     Wi-Fi 가 끊겨 있으면 삭제된 피드의 폴더 정리만 한다.
+//   - 펌웨어 업데이트 확인: CONFIG_APP_OTA_CHECK_INTERVAL_H 마다 (연결 직후, APP_EVT_REQ_OTA_CHECK 시 즉시)
+//     설치(APP_EVT_REQ_OTA_START)는 다른 작업보다 먼저 이 태스크에서 실행한다 (끝나면 재부팅)
 //   - Wi-Fi 연결 직후, 새로고침 요청, 설정 변경(종목) 시 즉시 갱신 (Flickr 는 연결 직후와 APP_EVT_REQ_FLICKR_SYNC)
 
 #include "services.h"
@@ -20,16 +22,21 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "net.h"
+#include "ota.h"
 #include "sdkconfig.h"
 
 #define NOTIFY_REFRESH      BIT0
 #define NOTIFY_SETTINGS     BIT1
 #define NOTIFY_FLICKR       BIT2
+#define NOTIFY_OTA_CHECK    BIT3
+#define NOTIFY_OTA_INSTALL  BIT4
 #define WEATHER_RETRY_MS    (60 * 1000)
 #define STOCKS_RETRY_MS     (30 * 1000)
 #define FLICKR_RETRY_MS     (10 * 60 * 1000)
+#define OTA_RETRY_MS        (30 * 60 * 1000)
 #define OFFLINE_WAIT_MS     (60 * 60 * 1000)
-#define TASK_STACK          (10 * 1024)   // TLS 핸드셰이크(ECDHE) 여유 포함
+#define TASK_STACK          (12 * 1024)   // TLS 핸드셰이크(ECDHE) + Flickr 다운로드 / esp_https_ota 호출 깊이
+#define STACK_WARN_BYTES    1536
 
 static const char *TAG = "net_worker";
 
@@ -47,7 +54,7 @@ static void on_app_event(void *arg, esp_event_base_t base, int32_t id, void *dat
     }
     switch (id) {
     case APP_EVT_WIFI_CONNECTED:
-        xTaskNotify(s_task, NOTIFY_REFRESH | NOTIFY_FLICKR, eSetBits);
+        xTaskNotify(s_task, NOTIFY_REFRESH | NOTIFY_FLICKR | NOTIFY_OTA_CHECK, eSetBits);
         break;
     case APP_EVT_REQ_REFRESH:
         xTaskNotify(s_task, NOTIFY_REFRESH, eSetBits);
@@ -58,8 +65,25 @@ static void on_app_event(void *arg, esp_event_base_t base, int32_t id, void *dat
     case APP_EVT_SETTINGS_CHANGED:
         xTaskNotify(s_task, NOTIFY_SETTINGS, eSetBits);
         break;
+    case APP_EVT_REQ_OTA_CHECK:
+        xTaskNotify(s_task, NOTIFY_OTA_CHECK, eSetBits);
+        break;
+    case APP_EVT_REQ_OTA_START:
+        xTaskNotify(s_task, NOTIFY_OTA_INSTALL, eSetBits);
+        break;
     default:
         break;
+    }
+}
+
+// 무거운 작업 뒤 남은 스택을 기록한다 (넘치면 옆 메모리를 덮어써 엉뚱한 곳에서 멈추므로 미리 확인)
+static void log_stack(const char *after)
+{
+    unsigned left = (unsigned)uxTaskGetStackHighWaterMark(NULL);
+    if (left < STACK_WARN_BYTES) {
+        ESP_LOGW(TAG, "stack nearly full after %s: %u bytes left", after, left);
+    } else {
+        ESP_LOGI(TAG, "stack after %s: %u bytes left", after, left);
     }
 }
 
@@ -70,10 +94,11 @@ static void worker(void *arg)
     configASSERT(settings && stocks);
     settings_load(settings);
 
-    int64_t next_weather = 0, next_stocks = 0, next_flickr = 0;
+    int64_t next_weather = 0, next_stocks = 0, next_flickr = 0, next_ota = 0;
     for (;;) {
         int64_t next = next_weather < next_stocks ? next_weather : next_stocks;
         next = next_flickr < next ? next_flickr : next;
+        next = next_ota < next ? next_ota : next;
         int64_t wait = next - now_ms();
         if (wait < 0) {
             wait = 0;
@@ -92,12 +117,19 @@ static void worker(void *arg)
         if (bits & NOTIFY_FLICKR) {
             next_flickr = 0;
         }
+        if (bits & NOTIFY_OTA_CHECK) {
+            next_ota = 0;
+        }
+        if (bits & NOTIFY_OTA_INSTALL) {
+            ota_install();   // 성공하면 곧 재부팅, 네트워크가 없으면 바로 실패를 알린다
+            log_stack("OTA install");
+        }
         if (!wifi_mgr_is_connected()) {
             if (now_ms() >= next_flickr) {
                 app_flickr_sync(false);   // 네트워크 없이: 삭제된 피드의 사진만 정리
             }
             // 연결되면 APP_EVT_WIFI_CONNECTED 로 깨어난다
-            next_weather = next_stocks = next_flickr = now_ms() + OFFLINE_WAIT_MS;
+            next_weather = next_stocks = next_flickr = next_ota = now_ms() + OFFLINE_WAIT_MS;
             continue;
         }
 
@@ -118,12 +150,18 @@ static void worker(void *arg)
                 next_stocks = now_ms() + STOCKS_RETRY_MS;
             }
         }
+        if (now_ms() >= next_ota) {
+            esp_err_t err = ota_check();   // 새 버전이면 APP_EVT_OTA_AVAILABLE
+            next_ota = now_ms() + (err == ESP_OK || err == ESP_ERR_NOT_FOUND
+                                   ? (int64_t)CONFIG_APP_OTA_CHECK_INTERVAL_H * 3600 * 1000 : OTA_RETRY_MS);
+            log_stack("OTA check");
+        }
         // 날씨/주가 다음에: 처음 동기화는 사진을 여러 장 받아 1분 넘게 걸릴 수 있다
         if (now_ms() >= next_flickr) {
             esp_err_t err = app_flickr_sync(true);
             next_flickr = now_ms() + (err == ESP_OK ? (int64_t)CONFIG_APP_FLICKR_SYNC_MIN * 60 * 1000 : FLICKR_RETRY_MS);
+            log_stack("Flickr sync");
         }
-        ESP_LOGD(TAG, "stack high water mark: %u bytes", (unsigned)uxTaskGetStackHighWaterMark(NULL));
     }
 }
 

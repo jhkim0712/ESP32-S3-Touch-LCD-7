@@ -10,6 +10,7 @@
 #include "board.h"
 #include "media_ble.h"
 #include "net.h"
+#include "ota.h"
 #include "photo.h"
 #include "services.h"
 #include "ui.h"
@@ -69,8 +70,9 @@ extern "C" void app_main(void)
     // Wi-Fi 는 SSID 가 비어 있어도 시작한다 (설정 페이지 스캔에 필요)
     ESP_ERROR_CHECK(wifi_mgr_start(settings.wifi_ssid, settings.wifi_pass));
     ESP_ERROR_CHECK(time_sync_start());
+    ESP_ERROR_CHECK(ota_init());           // 업데이트 직후면 60초 뒤 롤백 취소
     ESP_ERROR_CHECK(app_flickr_init());
-    ESP_ERROR_CHECK(net_worker_start());   // 날씨/주가/Flickr 사진 피드
+    ESP_ERROR_CHECK(net_worker_start());   // 날씨/주가/Flickr 사진 피드/업데이트 확인
     if (web_server_start() != ESP_OK) {    // 브라우저 설정 페이지 (없어도 기기는 동작)
         ESP_LOGW(TAG, "web server unavailable");
     }
@@ -86,5 +88,4 @@ extern "C" void app_main(void)
              (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
 
     ESP_ERROR_CHECK(media_ble_start("Smart Display"));   // BLE 음악 리모컨
-    // [6단계] ota_start()   : GitHub Release 주기 확인, 부팅 성공 시 rollback 취소
 }

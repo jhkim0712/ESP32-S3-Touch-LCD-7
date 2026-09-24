@@ -40,7 +40,7 @@ ESP32-S3-Touch-LCD-7/
 │   │
 │   ├── photo/        [Storage]  photo_loader.c  JPG/PNG → RGB565 PSRAM 더블 버퍼
 │   │
-│   ├── ota/          [OTA]      github_ota.c  Releases API, semver, esp_https_ota, rollback
+│   ├── ota/          [OTA]      github_ota.c  Releases API, semver, esp_https_ota, rollback (net_worker 에서 호출)
 │   │
 │   ├── app_flickr/   [Network]  app_flickr.c  Flickr 피드 → SD 미러 (net_worker 에서 호출)
 │   │
@@ -99,8 +99,7 @@ ESP32-S3-Touch-LCD-7/
 |---|---|---|---|---|
 | Wi-Fi / lwIP (시스템) | 0 | 23/18 | — | |
 | NimBLE host (시스템) | 0 | 21 | — | AMS/HID |
-| `net_worker` | 0 | 5 | 8 KB (PSRAM 불가: TLS) | NTP 확인 → 날씨 → 주가 → OTA 확인을 **직렬 처리** |
-| `ota_task` | 0 | 4 | 8 KB | 승인 후 다운로드·플래시 쓰기 |
+| `net_worker` | 0 | 5 | 10 KB (PSRAM 불가: TLS) | 날씨 → 주가 → 업데이트 확인 → Flickr 동기화를 **직렬 처리**. 승인된 OTA 설치(다운로드·플래시 쓰기)도 여기서 실행 |
 | `lvgl` (esp_lvgl_port) | 1 | 4 | 8 KB | 렌더링, 입력, 타이머(시계 1초 갱신) |
 | `photo_loader` | 1 | 2 | 6 KB | 파일 읽기, JPEG 디코딩(LVGL 유휴 시간 사용) |
 | `httpd` (웹 설정) | 0 | 5 | 6 KB (내부 RAM: NVS 쓰기) | 웹 페이지, REST API. 동시 연결 3개 |
@@ -237,4 +236,28 @@ net_worker(core0) ─ http_get_alloc(open-meteo) ─ cJSON 파싱 ─ app_state_
 | 5-7 | 웹 UI: 브라우저에서 설정 (아래 2.8 참고) |
 | 5-8 | 웹 UI: 사진 업로드 (여러 장 동시) + 브라우저에서 자르기(crop) |
 | 5-9 | `app_flickr` 이식: 웹 UI 에 Flickr 피드(RSS 2.0) 등록 → `net_worker` 가 주기적으로 이미지를 SD 카드에 저장 → 전자앨범에 표시 (위 2.8 참고) |
-| 6 | `ota` + GitHub Actions 릴리스 워크플로 (웹 UI 에서도 업데이트 확인/실행) |
+| 6 | `ota` + GitHub Actions 릴리스 워크플로 (웹 UI 에서도 업데이트 확인/실행, 아래 2.10 참고) |
+
+## 2.10 GitHub Release OTA (6단계, 구현됨: `components/ota`, `.github/workflows/release.yml`)
+
+**릴리스 만들기**
+1. `version.txt` 를 새 버전으로 올리고 커밋합니다 (로컬 빌드의 버전. CI 는 태그에서 덮어씀).
+2. `git tag v0.2.0 && git push origin v0.2.0`
+3. GitHub Actions 가 ESP-IDF v6.1 로 빌드하고 Release 를 만들어 `smart_display.bin`(OTA 용)과
+   처음 USB 로 굽는 데 필요한 파일(bootloader, partition-table, ota_data_initial, storage)을 올립니다.
+
+**기기 동작**
+- `net_worker` 가 Wi-Fi 연결 직후와 `CONFIG_APP_OTA_CHECK_INTERVAL_H`(기본 6시간)마다
+  `api.github.com/repos/{owner}/{repo}/releases/latest` 를 확인합니다 (비인증 요청 한도: 시간당 60회). 실패하면 30분 후 다시 확인합니다.
+- `tag_name` 을 `esp_app_desc.version` 과 semver 로 비교해 새 버전이면 `APP_EVT_OTA_AVAILABLE` → 기기 팝업 (태그마다 한 번).
+  웹 설정 페이지의 "펌웨어 업데이트" 카드에서도 확인/설치할 수 있습니다 (`GET /api/ota`, `POST /api/ota/check`, `POST /api/ota/install`).
+- 설치(`APP_EVT_REQ_OTA_START`)도 `net_worker` 에서 `esp_https_ota` 로 실행합니다 → TLS 세션은 여전히 하나이고 별도 태스크 스택이 필요 없습니다.
+  설치 중에는 날씨/주가/Flickr 갱신이 멈추지만 끝나면 재부팅합니다.
+  GitHub 은 다운로드를 서명된 긴 URL 로 리다이렉트하므로 HTTP 버퍼를 늘렸습니다 (수신 4KB / 송신 2KB).
+- 받은 이미지의 `project_name` 이 다르면 쓰기 전에 거부합니다 (다른 프로젝트 파일을 올린 경우). 칩 종류와 이미지 검증은 `esp_https_ota` 가 합니다.
+- 진행률은 `APP_EVT_OTA_PROGRESS` → 기기 팝업(웹에서 시작했으면 진행 창을 새로 띄움)과 웹 진행 막대에 표시됩니다.
+- **롤백:** `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`. 새 펌웨어는 부팅 후 60초 동안 정상 동작하면 `esp_ota_mark_app_valid_cancel_rollback()` 으로 확정합니다.
+  그 전에 멈추거나 재부팅되면 부트로더가 이전 펌웨어로 되돌립니다.
+- **제약:** OTA 는 앱 파티션만 바꿉니다. LittleFS(`assets/`, 폰트)가 바뀐 릴리스는 USB 로 `storage.bin` 을 다시 써야 합니다.
+  펌웨어 서명(Secure Boot)은 쓰지 않으므로 저장소에 쓰기 권한이 있는 사람이 올린 Release 를 그대로 믿습니다.
+

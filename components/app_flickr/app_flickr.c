@@ -54,6 +54,20 @@ static char (*s_keep)[NAME_MAX_LEN];
 static char (*s_doomed)[NAME_MAX_LEN];
 static char (*s_orphans)[NAME_MAX_LEN];
 
+/* Per-image names/paths. The sync runs on net_worker's stack, and each image
+ * download does a full TLS handshake on top of it - so these stay off it
+ * (they were ~1.3KB there and overflowed the stack). */
+typedef struct {
+    char small_url[URL_MAX];
+    char small_name[NAME_MAX_LEN];
+    char orig_name[NAME_MAX_LEN];
+    char small_path[PATH_MAX_LEN];
+    char orig_path[PATH_MAX_LEN];
+    char part_path[PATH_MAX_LEN + 8];
+    char dir[PATH_MAX_LEN];
+} scratch_t;
+static scratch_t *s_scratch;
+
 /* ---------------------------------------------------------------------- */
 /* Small helpers                                                           */
 /* ---------------------------------------------------------------------- */
@@ -380,8 +394,8 @@ static esp_err_t fetch_feed(const char *url, char **out_doc, const char **out_er
  * power cut is just retried next sync. */
 static esp_err_t download_to_file(const char *url, const char *path)
 {
-    char part_path[PATH_MAX_LEN + 8];
-    snprintf(part_path, sizeof(part_path), "%s.part", path);
+    char *part_path = s_scratch->part_path;
+    snprintf(part_path, sizeof(s_scratch->part_path), "%s.part", path);
 
     int status = 0;
     esp_http_client_handle_t client = http_open(url, &status);
@@ -587,20 +601,20 @@ static esp_err_t sync_feed(const char *feed_url, const char *dir, int *io_images
     int failures = 0;
     for (size_t url_i = 0; url_i < url_count; url_i++) {
         const char *orig_url = s_urls[url_i];
-        char small_url[URL_MAX];
+        char *small_url = s_scratch->small_url;
         strcpy(small_url, orig_url);
         prefer_800px(small_url);
 
-        char small_name[NAME_MAX_LEN];
-        char orig_name[NAME_MAX_LEN];
-        url_to_name(small_url, small_name, sizeof(small_name));
-        url_to_name(orig_url, orig_name, sizeof(orig_name));
+        char *small_name = s_scratch->small_name;
+        char *orig_name = s_scratch->orig_name;
+        url_to_name(small_url, small_name, NAME_MAX_LEN);
+        url_to_name(orig_url, orig_name, NAME_MAX_LEN);
         bool has_small = strcmp(small_name, orig_name) != 0;
 
-        char small_path[PATH_MAX_LEN];
-        char orig_path[PATH_MAX_LEN];
-        if (snprintf(small_path, sizeof(small_path), "%s/%s", dir, small_name) >= (int)sizeof(small_path) ||
-            snprintf(orig_path, sizeof(orig_path), "%s/%s", dir, orig_name) >= (int)sizeof(orig_path)) {
+        char *small_path = s_scratch->small_path;
+        char *orig_path = s_scratch->orig_path;
+        if (snprintf(small_path, PATH_MAX_LEN, "%s/%s", dir, small_name) >= (int)PATH_MAX_LEN ||
+            snprintf(orig_path, PATH_MAX_LEN, "%s/%s", dir, orig_name) >= (int)PATH_MAX_LEN) {
             failures++;
             continue;
         }
@@ -687,8 +701,8 @@ esp_err_t app_flickr_sync(bool online)
             continue;
         }
         feed_hash(url, hashes[feed_count]);
-        char dir[PATH_MAX_LEN];
-        snprintf(dir, sizeof(dir), "%s/%s", FLICKR_DIR, hashes[feed_count]);
+        char *dir = s_scratch->dir;
+        snprintf(dir, sizeof(s_scratch->dir), "%s/%s", FLICKR_DIR, hashes[feed_count]);
         feed_count++;
 
         if (!online) {
@@ -738,7 +752,8 @@ esp_err_t app_flickr_init(void)
     s_keep = heap_caps_malloc(MAX_ITEMS * sizeof(*s_keep), caps);
     s_doomed = heap_caps_malloc(MAX_ITEMS * sizeof(*s_doomed), caps);
     s_orphans = heap_caps_malloc(MAX_ORPHAN_DIRS * sizeof(*s_orphans), caps);
-    if (!s_lock || !s_feeds || !s_urls || !s_keep || !s_doomed || !s_orphans) {
+    s_scratch = heap_caps_malloc(sizeof(*s_scratch), caps);
+    if (!s_lock || !s_feeds || !s_urls || !s_keep || !s_doomed || !s_orphans || !s_scratch) {
         return ESP_ERR_NO_MEM;
     }
     memset(&s_status, 0, sizeof(s_status));

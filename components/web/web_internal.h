@@ -21,3 +21,5 @@ bool web_query_param(httpd_req_t *req, const char *key, char *out, size_t size);
 esp_err_t web_photos_register(httpd_handle_t server);
 // Flickr 피드 API (web_flickr.c)
 esp_err_t web_flickr_register(httpd_handle_t server);
+// 펌웨어 업데이트 API (web_ota.c)
+esp_err_t web_ota_register(httpd_handle_t server);

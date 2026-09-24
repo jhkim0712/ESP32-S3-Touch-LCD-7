@@ -62,6 +62,21 @@ pip install pillow        # 아이폰 HEIC: pip install pillow-heif
 python tools/prepare_photos.py  D:\MyPhotos  F:\photos
 ```
 
+## 펌웨어 업데이트 (OTA)
+기기는 6시간마다 GitHub Release 의 최신 버전을 확인하고, 새 버전이 있으면 화면 팝업으로 알립니다. 웹 설정 페이지에서도 확인하고 설치할 수 있습니다.
+설치 후 60초 안에 기기가 멈추거나 재부팅되면 이전 펌웨어로 자동으로 되돌아갑니다.
+
+릴리스 만들기: `version.txt` 를 올려 커밋한 뒤 같은 버전의 태그를 push 합니다.
+```powershell
+git tag v0.2.0
+git push origin v0.2.0
+```
+GitHub Actions 가 빌드해 Release 에 `smart_display.bin` 등을 올립니다. 새 보드는 Release 파일로 USB 에 한 번 굽습니다.
+```powershell
+python -m esptool --chip esp32s3 -p COMx -b 460800 write-flash --flash-mode dio --flash-size 16MB --flash-freq 80m `
+  0x0 bootloader.bin 0x8000 partition-table.bin 0xf000 ota_data_initial.bin 0x20000 smart_display.bin 0xc20000 storage.bin
+```
+
 ## 웹 설정
 기기와 같은 Wi-Fi에 연결된 브라우저에서 `http://smart-display.local` (안 되면 기기 설정 화면에 표시된 IP 주소)로 접속합니다.
 처음 접속할 때 기기 설정 화면(톱니바퀴) > **웹 설정**에 표시된 6자리 PIN 을 입력합니다. PIN 은 처음 부팅할 때 무작위로 만들어 NVS 에 저장됩니다.
@@ -94,4 +109,4 @@ Flickr 피드 주소를 등록하면 1시간마다 새 사진을 `photos/flickr/
   - [x] 5-7 웹 UI 설정 (`http://smart-display.local`)
   - [x] 5-8 웹 UI 사진 업로드 (여러 장) + 자르기
   - [x] 5-9 Flickr 피드(RSS 2.0) 사진 동기화 → SD 카드 → 전자앨범 (`app_flickr` 이식)
-- [ ] 6단계 GitHub Release OTA
+- [x] 6단계 GitHub Release OTA

@@ -1,5 +1,6 @@
-# SRCS to be added in step 6: github_ota.c
 idf_component_register(
+    SRCS "github_ota.c"
     INCLUDE_DIRS "include"
-    REQUIRES esp_https_ota app_update cjson app_core net
+    PRIV_REQUIRES esp_https_ota esp_http_client app_update esp_app_format esp_timer mbedtls cjson
+                  app_core net board
 )

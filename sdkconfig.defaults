@@ -22,6 +22,10 @@ CONFIG_FREERTOS_HZ=1000
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 # Event handlers load/save NVS settings (default 2304 is too tight)
 CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096
+# Panic immediately (naming the task) when any task reaches the end of its
+# stack. The default canary check only runs at context switches and can miss
+# an overflow, which then corrupts a neighbouring TCB and crashes elsewhere.
+CONFIG_FREERTOS_WATCHPOINT_END_OF_STACK=y
 
 # ---------- PSRAM (Octal 8MB) ----------
 CONFIG_SPIRAM=y
