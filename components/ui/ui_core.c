@@ -197,7 +197,10 @@ esp_err_t ui_init(const board_handles_t *hw, const app_settings_t *settings)
 
     lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
     port_cfg.task_priority = 4;
-    port_cfg.task_stack = 8 * 1024;
+    // 깊은 객체 트리 다시 그리기 + 캐시에 없는 한글 글리프를 Tiny TTF 로 그릴 때
+    // (stb_truetype → LittleFS → flash 읽기) 약 7.7KB 까지 쓴다. 8KB 에서 넘친 적이 있어 여유를 둔다.
+    // flash 를 읽으므로 PSRAM 스택은 쓸 수 없다.
+    port_cfg.task_stack = 12 * 1024;
     port_cfg.task_affinity = 1;          // core 1: 렌더링 전용 (Wi-Fi/BLE 는 core 0)
     port_cfg.task_max_sleep_ms = 500;
     port_cfg.timer_period_ms = 5;

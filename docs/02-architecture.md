@@ -100,7 +100,7 @@ ESP32-S3-Touch-LCD-7/
 | Wi-Fi / lwIP (시스템) | 0 | 23/18 | — | |
 | NimBLE host (시스템) | 0 | 21 | — | AMS/HID |
 | `net_worker` | 0 | 5 | 10 KB (PSRAM 불가: TLS) | 날씨 → 주가 → 업데이트 확인 → Flickr 동기화를 **직렬 처리**. 승인된 OTA 설치(다운로드·플래시 쓰기)도 여기서 실행 |
-| `lvgl` (esp_lvgl_port) | 1 | 4 | 8 KB | 렌더링, 입력, 타이머(시계 1초 갱신) |
+| `lvgl` (esp_lvgl_port) | 1 | 4 | 12 KB (내부 RAM: 폰트 파일 flash 읽기) | 렌더링, 입력, 타이머(시계 1초 갱신). 한글 글리프를 처음 그릴 때 약 7.7KB 사용 |
 | `photo_loader` | 1 | 2 | 6 KB | 파일 읽기, JPEG 디코딩(LVGL 유휴 시간 사용) |
 | `httpd` (웹 설정) | 0 | 5 | 6 KB (내부 RAM: NVS 쓰기) | 웹 페이지, REST API. 동시 연결 3개 |
 | `mdns` | 0 | 1 | 4 KB (PSRAM) | `smart-display.local` 응답 |
