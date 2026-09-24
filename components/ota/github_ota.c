@@ -269,10 +269,10 @@ esp_err_t ota_install(void)
     };
     const esp_https_ota_config_t cfg = { .http_config = &http };
     int asset_size = st->latest.asset_size;
-    free(st);
 
     esp_https_ota_handle_t handle = NULL;
     esp_err_t err = esp_https_ota_begin(&cfg, &handle);
+    free(st);   // http.url 이 가리키므로 begin(HTTP 클라이언트가 URL 을 복사) 이후에 해제
     if (err != ESP_OK) {
         return finish_install(err, "download failed");
     }
