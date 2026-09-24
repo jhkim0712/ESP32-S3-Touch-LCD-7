@@ -1,0 +1,29 @@
+menu "Board: RGB LCD timing"
+
+    config BOARD_LCD_PCLK_MHZ
+        int "Pixel clock (MHz)"
+        range 8 21
+        default 16
+        help
+            RGB panel pixel clock. 16 MHz is the Waveshare reference value
+            (about 39 frames/s). If text shows a faint shadow smeared to the
+            side, try a lower clock (12-14). Higher than 18 needs the bounce
+            buffer and may drift while Wi-Fi/flash are busy.
+
+    config BOARD_LCD_PCLK_ACTIVE_NEG
+        bool "Sample data on the falling PCLK edge"
+        default y
+        help
+            The panel latches RGB data on this PCLK edge. The Waveshare
+            reference uses the falling edge (y). If every edge in the image
+            has a shadow or a 1-pixel ghost, try the other edge (n).
+
+    config BOARD_LCD_HSYNC_BACK_PORCH
+        int "HSYNC back porch (PCLK cycles)"
+        range 4 80
+        default 8
+        help
+            Reference value 8. A larger value (e.g. 40) moves the start of each
+            line later; it does not change the picture if the panel uses DE.
+
+endmenu

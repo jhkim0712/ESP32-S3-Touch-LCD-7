@@ -2,6 +2,8 @@
 // 출처: Waveshare 회로도 / 공식 ESP-IDF·ESP32_Display_Panel 예제
 #pragma once
 
+#include "sdkconfig.h"
+
 #include "driver/gpio.h"
 
 // ---------------------------------------------------------------------------
@@ -9,15 +11,20 @@
 // ---------------------------------------------------------------------------
 #define BOARD_LCD_H_RES             800
 #define BOARD_LCD_V_RES             480
-#define BOARD_LCD_PCLK_HZ           (16 * 1000 * 1000)   // bounce buffer 사용 시 18~21MHz 까지 시도 가능
+// 타이밍은 menuconfig "Board: RGB LCD timing" 에서 바꿀 수 있다 (기본값 = Waveshare 참고값)
+#define BOARD_LCD_PCLK_HZ           (CONFIG_BOARD_LCD_PCLK_MHZ * 1000 * 1000)
 
 #define BOARD_LCD_HSYNC_PULSE       4
-#define BOARD_LCD_HSYNC_BACK_PORCH  8
+#define BOARD_LCD_HSYNC_BACK_PORCH  CONFIG_BOARD_LCD_HSYNC_BACK_PORCH
 #define BOARD_LCD_HSYNC_FRONT_PORCH 8
 #define BOARD_LCD_VSYNC_PULSE       4
 #define BOARD_LCD_VSYNC_BACK_PORCH  8
 #define BOARD_LCD_VSYNC_FRONT_PORCH 8
-#define BOARD_LCD_PCLK_ACTIVE_NEG   1
+#if CONFIG_BOARD_LCD_PCLK_ACTIVE_NEG
+#define BOARD_LCD_PCLK_ACTIVE_NEG   1   // 하강 에지에서 데이터 샘플링
+#else
+#define BOARD_LCD_PCLK_ACTIVE_NEG   0
+#endif
 
 #define BOARD_LCD_PIN_HSYNC         GPIO_NUM_46
 #define BOARD_LCD_PIN_VSYNC         GPIO_NUM_3
