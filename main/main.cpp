@@ -5,14 +5,15 @@
 #include <time.h>
 
 #include "app_state.h"
+#include "app_flickr.h"
 #include "app_storage.h"
 #include "board.h"
-#include "demo_data.h"
 #include "media_ble.h"
 #include "net.h"
 #include "photo.h"
 #include "services.h"
 #include "ui.h"
+#include "web_server.h"
 
 #include "esp_app_desc.h"
 #include "esp_heap_caps.h"
@@ -68,15 +69,17 @@ extern "C" void app_main(void)
     // Wi-Fi 는 SSID 가 비어 있어도 시작한다 (설정 페이지 스캔에 필요)
     ESP_ERROR_CHECK(wifi_mgr_start(settings.wifi_ssid, settings.wifi_pass));
     ESP_ERROR_CHECK(time_sync_start());
-    ESP_ERROR_CHECK(net_worker_start());   // 날씨/주가
+    ESP_ERROR_CHECK(app_flickr_init());
+    ESP_ERROR_CHECK(net_worker_start());   // 날씨/주가/Flickr 사진 피드
+    if (web_server_start() != ESP_OK) {    // 브라우저 설정 페이지 (없어도 기기는 동작)
+        ESP_LOGW(TAG, "web server unavailable");
+    }
 
     // SD 카드가 없어도 부팅은 계속한다 (전자앨범은 /storage/photos 를 대신 찾는다)
     board_sdcard_mount();
     uint16_t photo_w, photo_h;
     ui_photo_area(settings.rotation, &photo_w, &photo_h);
     ESP_ERROR_CHECK(photo_start(CONFIG_APP_PHOTO_DIR, settings.photo_interval_s, photo_w, photo_h));
-
-    demo_data_start();
 
     ESP_LOGI(TAG, "free heap: internal %u KB, PSRAM %u KB",
              (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),

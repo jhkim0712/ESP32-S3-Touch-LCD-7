@@ -33,6 +33,7 @@
 #define NOTIFY_NEXT         BIT0
 #define NOTIFY_PREV         BIT1
 #define NOTIFY_SETTINGS     BIT2
+#define NOTIFY_RESCAN       BIT3
 
 static const char *TAG = "photo";
 
@@ -475,7 +476,8 @@ static void on_app_event(void *arg, esp_event_base_t base, int32_t id, void *dat
 {
     uint32_t bit = id == APP_EVT_REQ_PHOTO_NEXT ? NOTIFY_NEXT
                  : id == APP_EVT_REQ_PHOTO_PREV ? NOTIFY_PREV
-                 : id == APP_EVT_SETTINGS_CHANGED ? NOTIFY_SETTINGS : 0;
+                 : id == APP_EVT_SETTINGS_CHANGED ? NOTIFY_SETTINGS
+                 : id == APP_EVT_REQ_PHOTO_RESCAN ? NOTIFY_RESCAN : 0;
     if (bit && s_task) {
         xTaskNotify(s_task, bit, eSetBits);
     }
@@ -491,8 +493,21 @@ static void reload_interval(void)
     free(s);
 }
 
-// 간격만큼 기다린 뒤 다음(+1)/이전(-1) 을 반환. 탭 요청은 바로, 설정 변경은 반영 후 계속 대기.
-static int wait_for_step(void)
+// 목록을 다시 읽고, 표시 중인 사진(current)의 새 목록 번호를 반환한다 (없어졌으면 가까운 번호).
+static int rescan_keep(const char *current, int index)
+{
+    rescan();
+    for (int i = 0; i < s_count; i++) {
+        if (strcmp(s_files[i], current) == 0) {
+            return i;
+        }
+    }
+    return index < s_count ? index : s_count - 1;
+}
+
+// 간격만큼 기다린 뒤 다음(+1)/이전(-1) 을 반환. 탭 요청은 바로, 설정 변경과 목록 갱신은 반영 후 계속 대기.
+// 목록이 바뀌면 *index 를 새 목록 기준으로 고친다.
+static int wait_for_step(const char *current, int *index)
 {
     for (;;) {
         uint32_t bits = 0;
@@ -501,6 +516,12 @@ static int wait_for_step(void)
         }
         if (bits & NOTIFY_SETTINGS) {
             reload_interval();
+        }
+        if (bits & NOTIFY_RESCAN) {
+            *index = rescan_keep(current, *index);
+            if (s_count == 0) {
+                return 1;   // 사진이 모두 삭제됨: 태스크 루프가 빈 화면을 처리
+            }
         }
         if (bits & NOTIFY_PREV) {
             return -1;
@@ -558,7 +579,7 @@ static void photo_task(void *arg)
             continue;
         }
 
-        step = wait_for_step();
+        step = wait_for_step(s_frames[front].path, &index);
     }
 }
 

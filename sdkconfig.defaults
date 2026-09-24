@@ -59,6 +59,16 @@ CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
 CONFIG_MBEDTLS_DYNAMIC_FREE_CONFIG_DATA=y
 CONFIG_ESP_HTTP_CLIENT_ENABLE_HTTPS=y
 
+# ---------- Web settings (HTTP server + mDNS smart-display.local) ----------
+# mDNS only answers queries and does no flash writes, so its task stack and
+# packet buffers can live in PSRAM. Browse/console/AP/ETH are not used.
+CONFIG_MDNS_TASK_CREATE_FROM_SPIRAM=y
+CONFIG_MDNS_MEMORY_ALLOC_SPIRAM=y
+CONFIG_MDNS_ENABLE_CONSOLE_CLI=n
+CONFIG_MDNS_ENABLE_BROWSE=n
+CONFIG_MDNS_PREDEF_NETIF_AP=n
+CONFIG_MDNS_PREDEF_NETIF_ETH=n
+
 # ---------- OTA ----------
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 
@@ -85,6 +95,12 @@ CONFIG_BT_ENABLED=n
 CONFIG_FATFS_LFN_HEAP=y
 CONFIG_FATFS_MAX_LFN=255
 CONFIG_FATFS_API_ENCODING_UTF_8=y
+# Web upload/delete and the slideshow touch the SD card from different tasks.
+# FatFs file locking makes deleting a file that is open for reading fail
+# (EBUSY) instead of corrupting the volume. The limit counts open files AND
+# directories: the photo scan keeps up to 5 directories open (depth 4), the
+# web server 1-2, plus the files being read/written.
+CONFIG_FATFS_FS_LOCK=10
 
 # ---------- LVGL 9.x ----------
 CONFIG_LV_COLOR_DEPTH_16=y

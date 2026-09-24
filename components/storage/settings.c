@@ -4,8 +4,10 @@
 
 #include "app_storage.h"
 
+#include <stdio.h>
 #include <string.h>
 #include "esp_check.h"
+#include "esp_random.h"
 #include "nvs.h"
 #include "sdkconfig.h"
 
@@ -17,6 +19,8 @@
 #define KEY_LANGUAGE    "lang"
 #define KEY_PHOTO_INT   "photo_int"
 #define KEY_SYMBOLS     "symbols"
+#define KEY_WEB_PIN     "web_pin"
+#define KEY_FLICKR      "flickr"
 
 static const char *TAG = "settings";
 
@@ -93,4 +97,49 @@ esp_err_t settings_save(const app_settings_t *in)
     ESP_LOGI(TAG, "saved (ui_mode=%d rotation=%d lang=%d photo=%ds)", in->ui_mode, in->rotation,
              in->language, in->photo_interval_s);
     return ESP_OK;
+}
+
+esp_err_t settings_get_flickr_feeds(char *out, size_t size)
+{
+    out[0] = '\0';
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(NS, NVS_READONLY, &h);
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        return ESP_OK;
+    }
+    ESP_RETURN_ON_ERROR(err, TAG, "open");
+    size_t len = size;
+    err = nvs_get_str(h, KEY_FLICKR, out, &len);
+    nvs_close(h);
+    if (err != ESP_OK) {
+        out[0] = '\0';
+    }
+    return err == ESP_OK || err == ESP_ERR_NVS_NOT_FOUND ? ESP_OK : err;
+}
+
+esp_err_t settings_set_flickr_feeds(const char *feeds)
+{
+    nvs_handle_t h;
+    ESP_RETURN_ON_ERROR(nvs_open(NS, NVS_READWRITE, &h), TAG, "open");
+    esp_err_t err = nvs_set_str(h, KEY_FLICKR, feeds);
+    if (err == ESP_OK) err = nvs_commit(h);
+    nvs_close(h);
+    return err;
+}
+
+esp_err_t settings_get_web_pin(char *out, size_t size)
+{
+    ESP_RETURN_ON_FALSE(size >= 7, ESP_ERR_INVALID_SIZE, TAG, "pin buffer");
+    nvs_handle_t h;
+    ESP_RETURN_ON_ERROR(nvs_open(NS, NVS_READWRITE, &h), TAG, "open");
+
+    size_t len = size;
+    esp_err_t err = nvs_get_str(h, KEY_WEB_PIN, out, &len);
+    if (err != ESP_OK || strlen(out) != 6) {
+        snprintf(out, size, "%06u", (unsigned)(esp_random() % 1000000));
+        err = nvs_set_str(h, KEY_WEB_PIN, out);
+        if (err == ESP_OK) err = nvs_commit(h);
+    }
+    nvs_close(h);
+    return err;
 }

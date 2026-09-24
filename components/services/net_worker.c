@@ -3,11 +3,14 @@
 // (TLS 세션 하나가 내부 RAM 을 수십 KB 사용).
 //   - 날씨: CONFIG_APP_WEATHER_REFRESH_MIN 마다, 실패 시 1분 후 재시도
 //   - 주가: CONFIG_APP_STOCK_REFRESH_SEC 마다, 실패 시 30초 후 재시도
-//   - Wi-Fi 연결 직후, 새로고침 요청, 설정 변경(종목) 시 즉시 갱신
+//   - Flickr 사진 피드: CONFIG_APP_FLICKR_SYNC_MIN 마다, 실패 시 10분 후 재시도 (app_flickr_sync)
+//     Wi-Fi 가 끊겨 있으면 삭제된 피드의 폴더 정리만 한다.
+//   - Wi-Fi 연결 직후, 새로고침 요청, 설정 변경(종목) 시 즉시 갱신 (Flickr 는 연결 직후와 APP_EVT_REQ_FLICKR_SYNC)
 
 #include "services.h"
 
 #include <stdlib.h>
+#include "app_flickr.h"
 #include "app_storage.h"
 #include "cJSON.h"
 #include "esp_check.h"
@@ -21,8 +24,11 @@
 
 #define NOTIFY_REFRESH      BIT0
 #define NOTIFY_SETTINGS     BIT1
+#define NOTIFY_FLICKR       BIT2
 #define WEATHER_RETRY_MS    (60 * 1000)
 #define STOCKS_RETRY_MS     (30 * 1000)
+#define FLICKR_RETRY_MS     (10 * 60 * 1000)
+#define OFFLINE_WAIT_MS     (60 * 60 * 1000)
 #define TASK_STACK          (10 * 1024)   // TLS 핸드셰이크(ECDHE) 여유 포함
 
 static const char *TAG = "net_worker";
@@ -41,8 +47,13 @@ static void on_app_event(void *arg, esp_event_base_t base, int32_t id, void *dat
     }
     switch (id) {
     case APP_EVT_WIFI_CONNECTED:
+        xTaskNotify(s_task, NOTIFY_REFRESH | NOTIFY_FLICKR, eSetBits);
+        break;
     case APP_EVT_REQ_REFRESH:
         xTaskNotify(s_task, NOTIFY_REFRESH, eSetBits);
+        break;
+    case APP_EVT_REQ_FLICKR_SYNC:
+        xTaskNotify(s_task, NOTIFY_FLICKR, eSetBits);
         break;
     case APP_EVT_SETTINGS_CHANGED:
         xTaskNotify(s_task, NOTIFY_SETTINGS, eSetBits);
@@ -59,9 +70,10 @@ static void worker(void *arg)
     configASSERT(settings && stocks);
     settings_load(settings);
 
-    int64_t next_weather = 0, next_stocks = 0;
+    int64_t next_weather = 0, next_stocks = 0, next_flickr = 0;
     for (;;) {
         int64_t next = next_weather < next_stocks ? next_weather : next_stocks;
+        next = next_flickr < next ? next_flickr : next;
         int64_t wait = next - now_ms();
         if (wait < 0) {
             wait = 0;
@@ -77,9 +89,15 @@ static void worker(void *arg)
             next_weather = 0;
             next_stocks = 0;
         }
+        if (bits & NOTIFY_FLICKR) {
+            next_flickr = 0;
+        }
         if (!wifi_mgr_is_connected()) {
+            if (now_ms() >= next_flickr) {
+                app_flickr_sync(false);   // 네트워크 없이: 삭제된 피드의 사진만 정리
+            }
             // 연결되면 APP_EVT_WIFI_CONNECTED 로 깨어난다
-            next_weather = next_stocks = now_ms() + 3600000;
+            next_weather = next_stocks = next_flickr = now_ms() + OFFLINE_WAIT_MS;
             continue;
         }
 
@@ -99,6 +117,11 @@ static void worker(void *arg)
             } else {
                 next_stocks = now_ms() + STOCKS_RETRY_MS;
             }
+        }
+        // 날씨/주가 다음에: 처음 동기화는 사진을 여러 장 받아 1분 넘게 걸릴 수 있다
+        if (now_ms() >= next_flickr) {
+            esp_err_t err = app_flickr_sync(true);
+            next_flickr = now_ms() + (err == ESP_OK ? (int64_t)CONFIG_APP_FLICKR_SYNC_MIN * 60 * 1000 : FLICKR_RETRY_MS);
         }
         ESP_LOGD(TAG, "stack high water mark: %u bytes", (unsigned)uxTaskGetStackHighWaterMark(NULL));
     }

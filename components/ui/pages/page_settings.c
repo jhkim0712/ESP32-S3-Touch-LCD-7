@@ -1,6 +1,6 @@
 // 설정 페이지 (상태 표시줄의 톱니바퀴 버튼)
 //   Wi-Fi SSID(직접 입력 또는 [Scan] 목록에서 선택)/비밀번호, 연결 상태, BLE 페어링 상태/해제,
-//   화면 회전, 사진 전환 간격, 주식 종목, 기기 정보
+//   화면 회전, 사진 전환 간격, 주식 종목, 웹 설정 주소/PIN, 기기 정보
 // [Save] → NVS 저장 + APP_EVT_SETTINGS_CHANGED (Wi-Fi 는 새 설정으로 재연결).
 // 회전이 바뀌었으면 재부팅을 묻는다.
 
@@ -17,6 +17,8 @@
 #include "esp_system.h"
 #include "media_ble.h"
 #include "sdkconfig.h"
+
+#define WEB_HOSTNAME    "smart-display"   // wifi_mgr 의 호스트 이름, mDNS 이름
 
 typedef struct {
     lv_obj_t *ssid;
@@ -275,6 +277,20 @@ static void wifi_status_cb(lv_observer_t *o, lv_subject_t *subj)
     }
 }
 
+static void web_address_cb(lv_observer_t *o, lv_subject_t *subj)
+{
+    lv_obj_t *label = lv_observer_get_target_obj(o);
+    char ip[16];
+    app_state_get_ip(ip, sizeof(ip));
+    if (lv_subject_get_int(subj) && ip[0]) {
+        lv_label_set_text_fmt(label, "http://" WEB_HOSTNAME ".local\nhttp://%s", ip);
+        lv_obj_set_style_text_color(label, UI_COLOR_TEXT, 0);
+    } else {
+        lv_label_set_text(label, TR("Available after Wi-Fi connects", "Wi-Fi 에 연결되면 사용할 수 있습니다"));
+        lv_obj_set_style_text_color(label, UI_COLOR_DIM, 0);
+    }
+}
+
 static void __attribute__((unused)) ble_status_cb(lv_observer_t *o, lv_subject_t *subj)
 {
     lv_obj_t *label = lv_observer_get_target_obj(o);
@@ -457,6 +473,19 @@ void ui_settings_open(void)
     v->symbols = text_field(row(card, TR("Symbols", "종목")), v, s.stock_symbols, sizeof(s.stock_symbols) - 1, false);
     hint(card, TR("Comma separated Yahoo symbols. ^KS11 = KOSPI, 005930.KS = Samsung",
                   "쉼표로 구분한 Yahoo 종목 코드. ^KS11 = 코스피, 005930.KS = 삼성전자"));
+
+    card = section(body, LV_SYMBOL_HOME, TR("Web settings", "웹 설정"));
+    lv_obj_t *addr = ui_label(row(card, TR("Address", "주소")), UI_FONT_M, UI_COLOR_TEXT, "");
+    lv_obj_set_flex_grow(addr, 1);
+    lv_subject_add_observer_obj(&ui_subj_wifi, web_address_cb, addr, NULL);
+    char pin[8];
+    if (settings_get_web_pin(pin, sizeof(pin)) != ESP_OK) {
+        strlcpy(pin, "-", sizeof(pin));
+    }
+    lv_obj_t *pin_label = ui_label(row(card, "PIN"), UI_FONT_L, UI_COLOR_ACCENT, pin);
+    lv_obj_set_style_text_letter_space(pin_label, 4, 0);
+    hint(card, TR("Open the address in a browser on the same Wi-Fi network and enter the PIN.",
+                  "같은 Wi-Fi 에 연결된 PC/휴대폰 브라우저에서 주소를 열고 PIN 을 입력하세요."));
 
     card = section(body, LV_SYMBOL_LIST, TR("About", "기기 정보"));
     const esp_app_desc_t *app = esp_app_get_description();

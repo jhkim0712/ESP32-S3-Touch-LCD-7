@@ -72,6 +72,24 @@ typedef struct {
     uint8_t data[];     // 이벤트 데이터 복사본
 } ui_msg_t;
 
+// 웹 설정 페이지에서 저장된 값 중 바로 적용할 수 있는 것(언어, 화면 모드)을 반영한다.
+// 기기 설정 화면이 열려 있으면 이전 값이 다시 저장되지 않도록 홈 화면으로 돌아간다.
+static void apply_web_settings(void)
+{
+    app_settings_t s;
+    if (settings_load(&s) != ESP_OK) {
+        return;
+    }
+    if (s.language == ui_lang_setting() && s.ui_mode == s_mode && !ui_settings_is_open()) {
+        return;
+    }
+    ui_lang_set(s.language);
+    s_mode = s.ui_mode;   // 이미 저장된 값이므로 APP_EVT_UI_MODE_CHANGED 는 보내지 않는다
+    ui_show_home(LV_SCREEN_LOAD_ANIM_FADE_IN);
+    ui_status_bar_set_mode(s_mode);
+    lv_subject_notify(&ui_subj_time);   // 상태 표시줄 날짜 (언어)
+}
+
 // LVGL 태스크에서 실행: subject 갱신 → observer 들이 화면을 다시 그림
 static void apply_event(void *p)
 {
@@ -92,6 +110,7 @@ static void apply_event(void *p)
     case APP_EVT_OTA_AVAILABLE:     ui_ota_popup_show((const ota_release_t *)data); break;
     case APP_EVT_OTA_PROGRESS:      ui_ota_popup_progress(*(const int *)data); break;
     case APP_EVT_OTA_DONE:          ui_ota_popup_done(*(const esp_err_t *)data); break;
+    case APP_EVT_SETTINGS_CHANGED:  apply_web_settings(); break;
     default: break;
     }
     lv_free(msg);
@@ -115,6 +134,12 @@ static void on_app_event(void *arg, esp_event_base_t base, int32_t id, void *dat
     case APP_EVT_OTA_AVAILABLE:     size = sizeof(ota_release_t); break;
     case APP_EVT_OTA_PROGRESS:      size = sizeof(int); break;
     case APP_EVT_OTA_DONE:          size = sizeof(esp_err_t); break;
+    case APP_EVT_SETTINGS_CHANGED:
+        // 기기 설정 페이지는 스스로 적용하므로 웹에서 바뀐 경우만 처리한다
+        if (!data || *(const app_settings_src_t *)data != APP_SETTINGS_SRC_WEB) {
+            return;
+        }
+        break;
     default:
         return;   // UI → 서비스 요청 이벤트는 무시
     }

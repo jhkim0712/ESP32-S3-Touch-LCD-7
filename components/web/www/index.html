@@ -1,0 +1,908 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Smart Display</title>
+<style>
+  :root {
+    --bg: #0e1116; --card: #1a1f27; --card-alt: #242a33; --text: #e6edf3;
+    --dim: #8b949e; --accent: #3da9fc; --warm: #ffb000; --bad: #ff5b5b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", "Malgun Gothic", sans-serif;
+  }
+  main { max-width: 760px; margin: 0 auto; padding: 16px; }
+  header { display: flex; align-items: center; gap: 12px; margin: 8px 0 12px; flex-wrap: wrap; }
+  header h1 { font-size: 22px; margin: 0; flex: 1; }
+  nav { display: flex; gap: 4px; background: var(--card); border-radius: 10px; padding: 4px; margin-bottom: 8px; }
+  nav button { flex: 1; border: 0; background: transparent; color: var(--dim); }
+  nav button.on { background: var(--card-alt); color: var(--text); }
+  h2 { font-size: 14px; color: var(--accent); margin: 20px 0 8px; font-weight: 600; }
+  .card { background: var(--card); border-radius: 12px; padding: 16px; display: grid; gap: 12px; }
+  .row { display: grid; grid-template-columns: 140px 1fr; gap: 12px; align-items: center; }
+  .row > span { color: var(--dim); }
+  .inline { display: flex; gap: 8px; }
+  .inline > input, .inline > select { flex: 1; min-width: 0; }
+  input, select, button {
+    font: inherit; color: var(--text); background: var(--card-alt);
+    border: 1px solid #30363d; border-radius: 8px; padding: 9px 12px; width: 100%;
+  }
+  input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  button { width: auto; cursor: pointer; white-space: nowrap; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #0e1116; font-weight: 600; }
+  button:disabled { opacity: .5; cursor: default; }
+  .hint { color: var(--dim); font-size: 13px; margin: 0; }
+  .msg { min-height: 1.5em; font-size: 14px; margin: 12px 0 0; }
+  .msg.ok { color: var(--accent); } .msg.err { color: var(--bad); } .msg.warn { color: var(--warm); }
+  .status { display: grid; grid-template-columns: 140px 1fr; gap: 4px 12px; font-size: 14px; }
+  .status dt { color: var(--dim); } .status dd { margin: 0; word-break: break-all; }
+  #aps { display: grid; gap: 6px; }
+  #aps button { display: flex; justify-content: space-between; width: 100%; text-align: left; }
+  #aps small { color: var(--dim); }
+  #login { max-width: 320px; margin: 18vh auto 0; text-align: center; }
+  #login input { font-size: 28px; letter-spacing: 8px; text-align: center; margin: 16px 0 12px; }
+  #login button { width: 100%; }
+  .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; flex-wrap: wrap; }
+  .banner { background: #3a2e10; color: var(--warm); border-radius: 12px; padding: 12px 16px;
+            display: flex; gap: 12px; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  /* 사진 */
+  .feed { display: flex; gap: 8px; align-items: center; }
+  .feed span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+  .feed button { padding: 4px 10px; }
+  #gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; margin-top: 12px; }
+  .tile { position: relative; background: var(--card); border-radius: 8px; overflow: hidden; aspect-ratio: 4 / 3; }
+  .tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .tile span { position: absolute; left: 0; right: 0; bottom: 0; padding: 2px 6px; font-size: 12px;
+               background: rgba(0,0,0,.55); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tile button { position: absolute; top: 4px; right: 4px; padding: 2px 9px; background: rgba(0,0,0,.6);
+                 border: 0; font-size: 16px; line-height: 1.4; }
+  .tile button:hover { background: var(--bad); }
+  progress { width: 100%; accent-color: var(--accent); }
+  .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.85); display: flex; align-items: center;
+             justify-content: center; padding: 12px; z-index: 10; }
+  .crop { background: var(--card); border-radius: 12px; padding: 16px; width: min(760px, 100%);
+          max-height: 100%; display: grid; gap: 12px; overflow: auto; }
+  .crop header { margin: 0; }
+  .crop header h3 { margin: 0; font-size: 16px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ratios { display: flex; gap: 6px; flex-wrap: wrap; }
+  .ratios button.on { background: var(--accent); color: #0e1116; border-color: var(--accent); }
+  #stage { display: flex; justify-content: center; }
+  #cropCanvas { touch-action: none; max-width: 100%; cursor: move; }
+  [hidden] { display: none !important; }
+  @media (max-width: 480px) {
+    .row, .status { grid-template-columns: 1fr; gap: 4px; }
+    .status dd { margin-bottom: 6px; }
+    #gallery { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); }
+  }
+</style>
+</head>
+<body>
+<main>
+  <section id="login" hidden>
+    <h1 data-t="title"></h1>
+    <p class="hint" data-t="pinHelp"></p>
+    <form id="loginForm">
+      <input id="pin" inputmode="numeric" autocomplete="off" maxlength="6" pattern="[0-9]{6}" required>
+      <button class="primary" data-t="login"></button>
+    </form>
+    <p id="loginMsg" class="msg err"></p>
+  </section>
+
+  <section id="app" hidden>
+    <header>
+      <h1 data-t="title"></h1>
+      <select id="uiLang" style="width:auto">
+        <option value="ko">한국어</option>
+        <option value="en">English</option>
+      </select>
+    </header>
+    <nav>
+      <button type="button" data-tab="settings" data-t="tabSettings"></button>
+      <button type="button" data-tab="photos" data-t="tabPhotos"></button>
+    </nav>
+
+    <div id="restartBanner" class="banner" hidden>
+      <span data-t="restartNeeded"></span>
+      <button data-t="restart" onclick="restart()"></button>
+    </div>
+
+    <!-- ===== 설정 ===== -->
+    <div id="tab-settings">
+      <h2 data-t="status"></h2>
+      <div class="card"><dl class="status" id="status"></dl></div>
+
+      <form id="form">
+        <h2>Wi-Fi</h2>
+        <div class="card">
+          <label class="row"><span data-t="ssid"></span>
+            <div class="inline">
+              <input id="wifi_ssid" maxlength="32" autocomplete="off">
+              <button type="button" id="scanBtn" data-t="scan" onclick="scan()"></button>
+            </div>
+          </label>
+          <div id="aps" hidden></div>
+          <label class="row"><span data-t="password"></span>
+            <input id="wifi_pass" type="password" maxlength="64" autocomplete="new-password">
+          </label>
+          <p class="hint" data-t="wifiHint"></p>
+        </div>
+
+        <h2 data-t="display"></h2>
+        <div class="card">
+          <label class="row"><span data-t="language"></span>
+            <select id="language"><option value="ko">한국어</option><option value="en">English</option></select>
+          </label>
+          <label class="row"><span data-t="mode"></span>
+            <select id="ui_mode">
+              <option value="widget" data-t="widget"></option>
+              <option value="slide" data-t="slide"></option>
+            </select>
+          </label>
+          <label class="row"><span data-t="rotation"></span>
+            <select id="rotation">
+              <option value="0">0°</option><option value="90">90°</option>
+              <option value="180">180°</option><option value="270">270°</option>
+            </select>
+          </label>
+          <p class="hint" data-t="rotationHint"></p>
+        </div>
+
+        <h2 data-t="photo"></h2>
+        <div class="card">
+          <label class="row"><span data-t="interval"></span>
+            <input id="photo_interval_s" type="number" min="3" max="3600" required>
+          </label>
+        </div>
+
+        <h2 data-t="stocks"></h2>
+        <div class="card">
+          <label class="row"><span data-t="symbols"></span>
+            <input id="stock_symbols" maxlength="127" autocomplete="off">
+          </label>
+          <p class="hint" data-t="symbolsHint"></p>
+        </div>
+
+        <p id="msg" class="msg"></p>
+        <div class="actions">
+          <button type="button" data-t="logout" onclick="logout()"></button>
+          <button type="button" data-t="restart" onclick="restart()"></button>
+          <button class="primary" id="saveBtn" data-t="save"></button>
+        </div>
+      </form>
+    </div>
+
+    <!-- ===== 사진 ===== -->
+    <div id="tab-photos" hidden>
+      <h2 data-t="tabPhotos"></h2>
+      <div class="card">
+        <p id="noSd" class="msg err" data-t="noSd" hidden></p>
+        <label class="row"><span data-t="album"></span>
+          <div class="inline">
+            <select id="album"></select>
+            <button type="button" data-t="newAlbum" onclick="newAlbum()"></button>
+          </div>
+        </label>
+        <div class="inline">
+          <button type="button" class="primary" id="addBtn" data-t="addPhotos" onclick="$('files').click()"></button>
+          <input type="file" id="files" accept="image/*" multiple hidden>
+        </div>
+        <p class="hint" data-t="uploadHint"></p>
+        <div id="uploadBox" hidden>
+          <progress id="uploadBar" max="1" value="0"></progress>
+          <p id="uploadText" class="hint"></p>
+        </div>
+      </div>
+      <h2>Flickr</h2>
+      <div class="card">
+        <div id="feeds" style="display:grid; gap:6px"></div>
+        <div class="inline">
+          <input id="feedUrl" autocomplete="off" inputmode="url"
+                 placeholder="https://www.flickr.com/services/feeds/photos_public.gne?id=...&amp;format=rss2">
+          <button type="button" id="addFeedBtn" data-t="addFeed" onclick="addFeed()"></button>
+        </div>
+        <p class="hint" data-t="flickrHint"></p>
+        <div class="inline" style="align-items:center">
+          <p id="flickrStatus" class="hint" style="flex:1"></p>
+          <button type="button" id="syncBtn" data-t="syncNow" onclick="syncFlickr()"></button>
+        </div>
+        <p id="flickrMsg" class="msg" style="margin:0"></p>
+      </div>
+      <h2 data-t="gallery"></h2>
+      <p id="photoMsg" class="msg"></p>
+      <div id="gallery"></div>
+      <div class="actions" style="justify-content:center">
+        <button type="button" id="moreBtn" data-t="more" onclick="renderMore()" hidden></button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- 자르기 화면 -->
+<div id="cropper" class="overlay" hidden>
+  <div class="crop">
+    <header><h3 id="cropTitle"></h3></header>
+    <div class="ratios" id="ratios">
+      <button type="button" data-ratio="land" data-t="ratioLand"></button>
+      <button type="button" data-ratio="port" data-t="ratioPort"></button>
+      <button type="button" data-ratio="free" data-t="ratioFree"></button>
+      <button type="button" data-ratio="full" data-t="ratioFull"></button>
+    </div>
+    <div id="stage"><canvas id="cropCanvas"></canvas></div>
+    <p class="hint" data-t="cropHint"></p>
+    <div class="actions" style="margin-top:0">
+      <button type="button" data-t="cancelAll" onclick="cropDone('cancel')"></button>
+      <button type="button" data-t="skip" onclick="cropDone('skip')"></button>
+      <button type="button" id="autoRestBtn" data-t="autoRest" onclick="cropDone('auto')"></button>
+      <button type="button" class="primary" data-t="upload" onclick="cropDone('ok')"></button>
+    </div>
+  </div>
+</div>
+
+<script>
+const T = {
+  ko: {
+    title: "Smart Display 설정", pinHelp: "기기의 설정 화면(톱니바퀴) > 웹 설정에 표시된 PIN 6자리를 입력하세요.",
+    login: "접속", badPin: "PIN 이 맞지 않습니다.", locked: "여러 번 틀렸습니다. 30초 뒤에 다시 시도하세요.",
+    offline: "기기에 연결할 수 없습니다.", status: "상태", firmware: "펌웨어", network: "네트워크",
+    notConnected: "연결 안 됨", time: "시각", notSynced: "동기화 전", uptime: "동작 시간", memory: "남은 메모리",
+    ssid: "네트워크 이름", scan: "검색", scanning: "검색 중...", noAps: "찾은 네트워크가 없습니다.",
+    password: "비밀번호", wifiHint: "비밀번호를 비워 두면 그대로 유지됩니다. 네트워크를 바꾸면 기기가 다시 연결하므로 이 페이지와 연결이 끊길 수 있습니다.",
+    display: "화면", language: "언어", mode: "화면 모드", widget: "위젯형", slide: "슬라이드형",
+    rotation: "회전", rotationHint: "회전은 다시 시작한 뒤 적용됩니다.",
+    photo: "전자앨범", interval: "전환 간격 (초)", stocks: "주식", symbols: "종목",
+    symbolsHint: "쉼표로 구분한 Yahoo 종목 코드. ^KS11 = 코스피, 005930.KS = 삼성전자",
+    save: "저장", saved: "저장했습니다.", saveFailed: "저장하지 못했습니다", restart: "다시 시작", logout: "로그아웃",
+    restartNeeded: "화면 회전을 적용하려면 기기를 다시 시작해야 합니다.", restartConfirm: "기기를 다시 시작할까요?",
+    restarting: "다시 시작하는 중... 잠시 후 새로고침하세요.",
+    wifiChanged: "저장했습니다. 기기가 새 네트워크로 연결합니다. 같은 네트워크에서 다시 접속하세요.",
+    days: "일", hours: "시간", minutes: "분",
+    tabSettings: "설정", tabPhotos: "사진",
+    noSd: "SD 카드가 없습니다. 기기에 SD 카드를 넣고 다시 시작하세요.",
+    album: "앨범", rootAlbum: "(기본 폴더)", newAlbum: "새 앨범", newAlbumPrompt: "새 앨범 이름",
+    badAlbum: "앨범 이름에 / \\ : * ? \" < > | 를 쓸 수 없고 . 으로 시작할 수 없습니다.",
+    addPhotos: "사진 추가", more: "더 보기", empty: "이 앨범에 사진이 없습니다.",
+    uploadHint: "여러 장을 한 번에 고를 수 있습니다. 한 장씩 자를 영역을 정하면 브라우저에서 화면 크기에 맞게 줄여 JPEG 로 올립니다.",
+    ratioLand: "화면 가로", ratioPort: "화면 세로", ratioFree: "자유", ratioFull: "전체",
+    cropHint: "영역을 끌어서 옮기고, 모서리를 끌어서 크기를 바꿉니다.",
+    cancelAll: "모두 취소", skip: "건너뛰기", autoRest: "나머지는 자동", upload: "올리기",
+    uploading: "올리는 중", uploadDone: "장을 올렸습니다.", uploadFailed: "올리지 못한 사진",
+    cantOpen: "열 수 없는 파일 (브라우저가 지원하지 않는 형식)",
+    deleteConfirm: "이 사진을 삭제할까요?", busy: "기기가 이 사진을 표시하는 중입니다. 잠시 후 다시 시도하세요.",
+    deleteFailed: "삭제하지 못했습니다",
+    gallery: "앨범 사진", addFeed: "추가", syncNow: "지금 동기화", removeFeed: "이 피드를 삭제할까요? 받아 둔 사진도 SD 카드에서 지워집니다.",
+    flickrHint: "Flickr 피드(RSS 2.0/Atom) 주소를 추가하면 1시간마다 새 사진을 SD 카드(photos/flickr)에 받아 전자앨범에 함께 표시합니다. 피드에서 빠진 사진과 삭제한 피드의 사진은 지워집니다. 사용자 ID 는 idgettr 같은 사이트나 Flickr 사진 페이지 소스에서 찾을 수 있습니다.",
+    noFeeds: "등록된 피드가 없습니다.", badFeed: "http:// 또는 https:// 로 시작하는 피드 주소를 입력하세요.", tooManyFeeds: "피드는 최대 {n}개까지 등록할 수 있습니다.",
+    syncing: "동기화 중...", lastSync: "마지막 동기화", neverSynced: "아직 동기화하지 않음", images: "사진",
+    unsupported: "표시할 수 없는 사진(progressive JPEG)", syncError: "오류", syncRequested: "동기화를 요청했습니다.",
+  },
+  en: {
+    title: "Smart Display Settings", pinHelp: "Enter the 6-digit PIN shown on the device under Settings (gear) > Web settings.",
+    login: "Sign in", badPin: "Wrong PIN.", locked: "Too many wrong PINs. Try again in 30 seconds.",
+    offline: "Cannot reach the device.", status: "Status", firmware: "Firmware", network: "Network",
+    notConnected: "Not connected", time: "Time", notSynced: "not synced", uptime: "Uptime", memory: "Free memory",
+    ssid: "Network name", scan: "Scan", scanning: "Scanning...", noAps: "No networks found.",
+    password: "Password", wifiHint: "Leave the password empty to keep it. Changing the network makes the device reconnect, so this page may lose its connection.",
+    display: "Display", language: "Language", mode: "Layout", widget: "Widgets", slide: "Slides",
+    rotation: "Rotation", rotationHint: "Rotation is applied after a restart.",
+    photo: "Photo frame", interval: "Interval (seconds)", stocks: "Stocks", symbols: "Symbols",
+    symbolsHint: "Comma separated Yahoo symbols. ^KS11 = KOSPI, 005930.KS = Samsung",
+    save: "Save", saved: "Saved.", saveFailed: "Save failed", restart: "Restart", logout: "Sign out",
+    restartNeeded: "Restart the device to apply the new screen rotation.", restartConfirm: "Restart the device?",
+    restarting: "Restarting... reload this page in a moment.",
+    wifiChanged: "Saved. The device is connecting to the new network. Reconnect from that network.",
+    days: "d", hours: "h", minutes: "m",
+    tabSettings: "Settings", tabPhotos: "Photos",
+    noSd: "No SD card. Insert an SD card into the device and restart it.",
+    album: "Album", rootAlbum: "(main folder)", newAlbum: "New album", newAlbumPrompt: "New album name",
+    badAlbum: "Album names cannot contain / \\ : * ? \" < > | or start with a dot.",
+    addPhotos: "Add photos", more: "Show more", empty: "No photos in this album.",
+    uploadHint: "You can pick several photos at once. Choose the area for each one; the browser shrinks it to the screen size and uploads a JPEG.",
+    ratioLand: "Landscape", ratioPort: "Portrait", ratioFree: "Free", ratioFull: "Whole",
+    cropHint: "Drag the area to move it, drag a corner to resize it.",
+    cancelAll: "Cancel all", skip: "Skip", autoRest: "Auto for the rest", upload: "Upload",
+    uploading: "Uploading", uploadDone: "photos uploaded.", uploadFailed: "Failed",
+    cantOpen: "cannot open (format not supported by this browser)",
+    deleteConfirm: "Delete this photo?", busy: "The device is showing this photo right now. Try again in a moment.",
+    deleteFailed: "Delete failed",
+    gallery: "Album photos", addFeed: "Add", syncNow: "Sync now", removeFeed: "Remove this feed? Its downloaded photos are deleted from the SD card too.",
+    flickrHint: "Add a Flickr feed (RSS 2.0/Atom) and the device downloads its new photos every hour to the SD card (photos/flickr) and shows them in the photo frame. Photos that leave the feed, and those of removed feeds, are deleted. Find a user ID with a site such as idgettr or in a Flickr photo page's source.",
+    noFeeds: "No feeds yet.", badFeed: "Enter a feed address starting with http:// or https://.", tooManyFeeds: "Up to {n} feeds.",
+    syncing: "Syncing...", lastSync: "Last sync", neverSynced: "Not synced yet", images: "photos",
+    unsupported: "not displayable (progressive JPEG)", syncError: "error", syncRequested: "Sync requested.",
+  },
+};
+const $ = id => document.getElementById(id);
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+  set(k, v) { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch (e) {} },
+};
+let lang = store.get("lang") || (navigator.language.startsWith("ko") ? "ko" : "en");
+let pin = store.get("pin");
+let loaded = null;       // 마지막으로 불러온 설정
+let tab = store.get("tab") || "settings";
+
+function t(key) { return T[lang][key] || key; }
+function applyLang() {
+  document.documentElement.lang = lang;
+  $("uiLang").value = lang;
+  document.querySelectorAll("[data-t]").forEach(el => { el.textContent = t(el.dataset.t); });
+  $("wifi_pass").placeholder = loaded && loaded.wifi_pass_set ? "••••••••" : "";
+  const root = $("album").querySelector('option[value=""]');
+  if (root) root.textContent = albumLabel({ name: "", count: root.dataset.count });
+}
+
+class ApiError extends Error { constructor(status, code) { super(code); this.status = status; } }
+async function request(path, body, type) {
+  const opt = { method: body === undefined ? "GET" : "POST", headers: { "X-PIN": pin || "" } };
+  if (body !== undefined) {
+    opt.headers["Content-Type"] = type || "application/json";
+    opt.body = type ? body : JSON.stringify(body);
+  }
+  let res;
+  try { res = await fetch(path, opt); } catch (e) { throw new ApiError(0, "offline"); }
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new ApiError(res.status, data.error || res.statusText);
+  }
+  return res;
+}
+async function api(path, body, type) { return (await request(path, body, type)).json(); }
+
+function show(which) {
+  $("login").hidden = which !== "login";
+  $("app").hidden = which !== "app";
+}
+function setMsg(el, text, kind) { el.textContent = text || ""; el.className = "msg " + (kind || ""); }
+function errText(e) {
+  return e.status === 401 ? t("badPin") : e.status === 429 ? t("locked") : e.status === 0 ? t("offline") : e.message;
+}
+function handleAuth(e) {
+  if (e.status === 401) { logout(); setMsg($("loginMsg"), t("badPin"), "err"); return true; }
+  return false;
+}
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// ---- 탭 ----
+function showTab(name) {
+  tab = name;
+  store.set("tab", name);
+  document.querySelectorAll("nav button").forEach(b => b.classList.toggle("on", b.dataset.tab === name));
+  $("tab-settings").hidden = name !== "settings";
+  $("tab-photos").hidden = name !== "photos";
+  if (name === "photos") {
+    loadAlbums().catch(e => { if (!handleAuth(e)) setMsg($("photoMsg"), errText(e), "err"); });
+    loadFlickr().catch(e => { if (!handleAuth(e)) setMsg($("flickrMsg"), errText(e), "err"); });
+  }
+}
+document.querySelectorAll("nav button").forEach(b => { b.onclick = () => showTab(b.dataset.tab); });
+
+// ---- 로그인 ----
+$("loginForm").onsubmit = async ev => {
+  ev.preventDefault();
+  pin = $("pin").value.trim();
+  try {
+    await refreshStatus();
+    store.set("pin", pin);
+    await loadSettings();
+    show("app");
+    showTab(tab);
+  } catch (e) {
+    setMsg($("loginMsg"), errText(e), "err");
+  }
+};
+function logout() {
+  store.set("pin", null);
+  pin = null;
+  $("pin").value = "";
+  setMsg($("loginMsg"), "");
+  show("login");
+}
+
+// ---- 상태 ----
+function fmtUptime(s) {
+  const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
+  return (d ? d + t("days") + " " : "") + h + t("hours") + " " + m + t("minutes");
+}
+async function refreshStatus() {
+  const s = await api("/api/status");
+  const net = s.wifi_connected ? `${s.ssid || ""}  ·  ${s.ip}  ·  ${s.rssi} dBm` : t("notConnected");
+  const time = s.time_synced ? new Date(s.time * 1000).toLocaleString(lang) : t("notSynced");
+  const rows = [
+    [t("firmware"), `v${s.version}  (ESP-IDF ${s.idf})`],
+    [t("network"), net],
+    [t("time"), time],
+    [t("uptime"), fmtUptime(s.uptime_s)],
+    [t("memory"), `internal ${s.heap_internal_kb} KB · PSRAM ${s.heap_psram_kb} KB`],
+  ];
+  const dl = $("status");
+  dl.replaceChildren();
+  for (const [k, v] of rows) {
+    const dt = document.createElement("dt"); dt.textContent = k;
+    const dd = document.createElement("dd"); dd.textContent = v;
+    dl.append(dt, dd);
+  }
+  $("restartBanner").hidden = !s.restart_required;
+}
+
+// ---- 설정 ----
+const FIELDS = ["wifi_ssid", "language", "ui_mode", "rotation", "photo_interval_s", "stock_symbols"];
+async function loadSettings() {
+  loaded = await api("/api/settings");
+  for (const f of FIELDS) $(f).value = loaded[f];
+  $("wifi_pass").value = "";
+  applyLang();
+}
+
+$("form").onsubmit = async ev => {
+  ev.preventDefault();
+  const body = {
+    wifi_ssid: $("wifi_ssid").value.trim(),
+    language: $("language").value,
+    ui_mode: $("ui_mode").value,
+    rotation: Number($("rotation").value),
+    photo_interval_s: Number($("photo_interval_s").value),
+    stock_symbols: $("stock_symbols").value.replace(/\s+/g, ""),
+  };
+  // 비밀번호: 새로 입력했거나, 네트워크를 바꿨으면 (빈 값 = 공개 네트워크) 보낸다
+  const pass = $("wifi_pass").value;
+  if (pass || body.wifi_ssid !== loaded.wifi_ssid) body.wifi_pass = pass;
+
+  $("saveBtn").disabled = true;
+  try {
+    const r = await api("/api/settings", body);
+    if (r.wifi_changed) {
+      setMsg($("msg"), t("wifiChanged"), "warn");
+      return;
+    }
+    setMsg($("msg"), t("saved"), "ok");
+    await loadSettings();
+    await refreshStatus();
+  } catch (e) {
+    if (!handleAuth(e)) setMsg($("msg"), `${t("saveFailed")}: ${errText(e)}`, "err");
+  } finally {
+    $("saveBtn").disabled = false;
+  }
+};
+
+async function scan() {
+  const btn = $("scanBtn"), box = $("aps");
+  btn.disabled = true;
+  btn.textContent = t("scanning");
+  try {
+    const r = await api("/api/wifi/scan", {});
+    box.replaceChildren();
+    if (!r.networks.length) {
+      const p = document.createElement("p"); p.className = "hint"; p.textContent = t("noAps");
+      box.append(p);
+    }
+    for (const ap of r.networks) {
+      const b = document.createElement("button");
+      b.type = "button";
+      const name = document.createElement("span"); name.textContent = ap.ssid;
+      const info = document.createElement("small"); info.textContent = `${ap.secure ? "🔒 " : ""}${ap.rssi} dBm`;
+      b.append(name, info);
+      b.onclick = () => { $("wifi_ssid").value = ap.ssid; $("wifi_pass").value = ""; box.hidden = true; $("wifi_pass").focus(); };
+      box.append(b);
+    }
+    box.hidden = false;
+  } catch (e) {
+    if (!handleAuth(e)) setMsg($("msg"), errText(e), "err");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = t("scan");
+  }
+}
+
+async function restart() {
+  if (!confirm(t("restartConfirm"))) return;
+  try {
+    await api("/api/restart", {});
+    setMsg($("msg"), t("restarting"), "warn");
+    $("restartBanner").hidden = true;
+  } catch (e) {
+    if (!handleAuth(e)) setMsg($("msg"), errText(e), "err");
+  }
+}
+
+// ---- 사진: 앨범 / 목록 ----
+const PAGE = 60;                 // 한 번에 보여줄 사진 수
+let photos = [];                 // 현재 앨범의 파일 이름 (정렬됨)
+let shown = 0;
+let thumbUrls = [];              // 해제할 blob URL
+let listGen = 0;                 // 앨범을 바꾸면 이전 썸네일 로딩을 멈추기 위한 번호
+
+const q = (album, name, extra) =>
+  `album=${encodeURIComponent(album)}` + (name != null ? `&name=${encodeURIComponent(name)}` : "") + (extra || "");
+function albumLabel(a) { return `${a.name || t("rootAlbum")} (${a.count})`; }
+function validName(s) { return s && !/[\/\\:*?"<>|\x00-\x1f]/.test(s) && !/^[. ]|[. ]$/.test(s) && new TextEncoder().encode(s).length <= 80; }
+
+async function loadAlbums(select) {
+  const r = await api("/api/photos");
+  $("noSd").hidden = r.sd;
+  $("addBtn").disabled = !r.sd;
+  const sel = $("album");
+  const want = select ?? (sel.options.length ? sel.value : store.get("album")) ?? "";
+  sel.replaceChildren();
+  for (const a of r.albums) {
+    const o = document.createElement("option");
+    o.value = a.name; o.dataset.count = a.count; o.textContent = albumLabel(a);
+    sel.append(o);
+  }
+  if (want && ![...sel.options].some(o => o.value === want)) {   // 아직 사진이 없는 새 앨범
+    const o = document.createElement("option");
+    o.value = want; o.dataset.count = 0; o.textContent = albumLabel({ name: want, count: 0 });
+    sel.append(o);
+  }
+  sel.value = [...sel.options].some(o => o.value === want) ? want : "";
+  if (r.sd) await loadPhotos();
+  else $("gallery").replaceChildren();
+}
+$("album").onchange = () => { store.set("album", $("album").value); loadPhotos().catch(e => setMsg($("photoMsg"), errText(e), "err")); };
+
+function newAlbum() {
+  const name = (prompt(t("newAlbumPrompt")) || "").trim();
+  if (!name) return;
+  if (!validName(name)) { setMsg($("photoMsg"), t("badAlbum"), "err"); return; }
+  store.set("album", name);
+  loadAlbums(name).catch(e => setMsg($("photoMsg"), errText(e), "err"));
+}
+
+async function loadPhotos() {
+  const album = $("album").value;
+  const r = await api("/api/photos/list?" + q(album));
+  photos = r.photos.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  listGen++;
+  thumbUrls.forEach(URL.revokeObjectURL);
+  thumbUrls = [];
+  shown = 0;
+  $("gallery").replaceChildren();
+  setMsg($("photoMsg"), photos.length ? "" : t("empty"));
+  renderMore();
+}
+
+// 썸네일은 fetch 로 받아 blob URL 로 표시 (X-PIN 헤더, 동시에 2장씩: 기기 연결 수가 적음)
+const thumbQueue = [];
+let thumbActive = 0;
+function queueThumb(img, album, name, gen) { thumbQueue.push({ img, album, name, gen }); pumpThumbs(); }
+async function pumpThumbs() {
+  while (thumbActive < 2 && thumbQueue.length) {
+    const job = thumbQueue.shift();
+    if (job.gen !== listGen) continue;
+    thumbActive++;
+    request("/api/photos/file?" + q(job.album, job.name, "&thumb=1"))
+      .then(res => res.blob())
+      .then(blob => { if (job.gen === listGen) { const u = URL.createObjectURL(blob); thumbUrls.push(u); job.img.src = u; } })
+      .catch(() => {})
+      .finally(() => { thumbActive--; pumpThumbs(); });
+  }
+}
+
+function renderMore() {
+  const album = $("album").value;
+  const end = Math.min(shown + PAGE, photos.length);
+  for (; shown < end; shown++) {
+    const name = photos[shown];
+    const tile = document.createElement("div");
+    tile.className = "tile";
+    const img = document.createElement("img"); img.alt = name;
+    const cap = document.createElement("span"); cap.textContent = name;
+    const del = document.createElement("button"); del.type = "button"; del.textContent = "×"; del.title = t("deleteConfirm");
+    del.onclick = () => deletePhoto(album, name, tile);
+    tile.append(img, cap, del);
+    $("gallery").append(tile);
+    queueThumb(img, album, name, listGen);
+  }
+  $("moreBtn").hidden = shown >= photos.length;
+}
+
+async function deletePhoto(album, name, tile) {
+  if (!confirm(`${t("deleteConfirm")}\n${name}`)) return;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await api("/api/photos/delete?" + q(album, name), {});
+      tile.remove();
+      photos = photos.filter(p => p !== name);
+      shown--;
+      const opt = $("album").selectedOptions[0];
+      if (opt) { opt.dataset.count = photos.length; opt.textContent = albumLabel({ name: album, count: photos.length }); }
+      if (!photos.length) setMsg($("photoMsg"), t("empty"));
+      return;
+    } catch (e) {
+      if (e.status === 409 && e.message === "busy" && attempt < 3) { await sleep(1500); continue; }
+      if (!handleAuth(e)) setMsg($("photoMsg"), e.status === 409 ? t("busy") : `${t("deleteFailed")}: ${errText(e)}`, "err");
+      return;
+    }
+  }
+}
+
+// ---- 사진: 자르기 + 업로드 ----
+// 기기의 사진 영역 크기 (상태 표시줄 제외). 이 크기로 잘라 올리면 기기에서 다시 줄이지 않는다.
+const AREA = { land: [800, 432], port: [480, 752] };
+const FREE_MAX = 800;
+const THUMB_MAX = 240;
+
+let crop = null;       // { img, rect:{x,y,w,h}, mode, k(표시 배율) }
+let cropResolve = null;
+let autoMode = null;   // "나머지는 자동" 을 누른 뒤의 비율
+
+$("files").onchange = () => {
+  const files = [...$("files").files];
+  $("files").value = "";
+  if (files.length) uploadFiles(files);
+};
+
+function loadImage(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => { URL.revokeObjectURL(url); resolve(img); };   // 최신 브라우저는 EXIF 방향을 적용해 준다
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error(t("cantOpen"))); };
+    img.src = url;
+  });
+}
+
+function ratioOf(mode) { return AREA[mode] ? AREA[mode][0] / AREA[mode][1] : null; }
+
+// 비율에 맞는 가장 큰 가운데 영역
+function defaultRect(img, mode) {
+  const W = img.naturalWidth, H = img.naturalHeight, r = ratioOf(mode);
+  if (!r) return { x: 0, y: 0, w: W, h: H };
+  let w = W, h = W / r;
+  if (h > H) { h = H; w = H * r; }
+  return { x: (W - w) / 2, y: (H - h) / 2, w, h };
+}
+
+function setMode(mode) {
+  crop.mode = mode;
+  crop.rect = defaultRect(crop.img, mode);
+  document.querySelectorAll("#ratios button").forEach(b => b.classList.toggle("on", b.dataset.ratio === mode));
+  drawCrop();
+}
+document.querySelectorAll("#ratios button").forEach(b => { b.onclick = () => setMode(b.dataset.ratio); });
+
+function drawCrop() {
+  const cv = $("cropCanvas"), ctx = cv.getContext("2d"), { img, rect, k } = crop;
+  ctx.drawImage(img, 0, 0, cv.width, cv.height);
+  const x = rect.x * k, y = rect.y * k, w = rect.w * k, h = rect.h * k;
+  ctx.fillStyle = "rgba(0,0,0,.6)";
+  ctx.fillRect(0, 0, cv.width, y);
+  ctx.fillRect(0, y + h, cv.width, cv.height - y - h);
+  ctx.fillRect(0, y, x, h);
+  ctx.fillRect(x + w, y, cv.width - x - w, h);
+  ctx.strokeStyle = "#3da9fc"; ctx.lineWidth = 2;
+  ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
+  ctx.fillStyle = "#3da9fc";
+  for (const [cx, cy] of [[x, y], [x + w, y], [x, y + h], [x + w, y + h]]) ctx.fillRect(cx - 7, cy - 7, 14, 14);
+}
+
+function showCropper(img, title) {
+  const cv = $("cropCanvas");
+  const maxW = Math.min(720, window.innerWidth - 56), maxH = window.innerHeight * 0.55;
+  const k = Math.min(maxW / img.naturalWidth, maxH / img.naturalHeight, 1);
+  cv.width = Math.round(img.naturalWidth * k);
+  cv.height = Math.round(img.naturalHeight * k);
+  crop = { img, k, rect: null, mode: null };
+  $("cropTitle").textContent = title;
+  $("cropper").hidden = false;
+  setMode(img.naturalWidth >= img.naturalHeight ? "land" : "port");
+  return new Promise(resolve => { cropResolve = resolve; });
+}
+function cropDone(action) {
+  $("cropper").hidden = true;
+  if (action === "auto") autoMode = crop.mode;
+  cropResolve(action);
+}
+
+// 끌기: 영역 안 = 이동, 모서리 = 크기 조절 (반대쪽 모서리 고정)
+let drag = null;
+function pointerPos(ev) {
+  const r = $("cropCanvas").getBoundingClientRect();
+  const s = $("cropCanvas").width / r.width;   // CSS 로 줄어든 경우
+  return { x: (ev.clientX - r.left) * s / crop.k, y: (ev.clientY - r.top) * s / crop.k };
+}
+$("cropCanvas").onpointerdown = ev => {
+  const p = pointerPos(ev), { x, y, w, h } = crop.rect, grab = 24 / crop.k;
+  const corners = [[x, y, x + w, y + h], [x + w, y, x, y + h], [x, y + h, x + w, y], [x + w, y + h, x, y]];
+  const c = corners.find(([cx, cy]) => Math.abs(p.x - cx) < grab && Math.abs(p.y - cy) < grab);
+  if (c) drag = { type: "resize", ax: c[2], ay: c[3] };
+  else if (p.x > x && p.x < x + w && p.y > y && p.y < y + h) drag = { type: "move", dx: p.x - x, dy: p.y - y };
+  else return;
+  if (crop.mode === "full") crop.mode = "free";
+  $("cropCanvas").setPointerCapture(ev.pointerId);
+};
+$("cropCanvas").onpointermove = ev => {
+  if (!drag) return;
+  const p = pointerPos(ev), W = crop.img.naturalWidth, H = crop.img.naturalHeight, r = crop.rect;
+  if (drag.type === "move") {
+    r.x = Math.min(Math.max(p.x - drag.dx, 0), W - r.w);
+    r.y = Math.min(Math.max(p.y - drag.dy, 0), H - r.h);
+  } else {
+    const ratio = ratioOf(crop.mode), sx = p.x < drag.ax ? -1 : 1, sy = p.y < drag.ay ? -1 : 1;
+    // 이미지 안에서 쓸 수 있는 최대 크기
+    const maxW = sx < 0 ? drag.ax : W - drag.ax, maxH = sy < 0 ? drag.ay : H - drag.ay;
+    let w = Math.min(Math.abs(p.x - drag.ax), maxW), h = Math.min(Math.abs(p.y - drag.ay), maxH);
+    if (ratio) {
+      if (w / h > ratio) w = h * ratio; else h = w / ratio;
+    }
+    const min = 32;
+    if (w < min || h < min) return;
+    r.w = w; r.h = h;
+    r.x = sx < 0 ? drag.ax - w : drag.ax;
+    r.y = sy < 0 ? drag.ay - h : drag.ay;
+  }
+  drawCrop();
+};
+$("cropCanvas").onpointerup = $("cropCanvas").onpointercancel = () => { drag = null; };
+
+function toJpeg(img, rect, maxW, maxH, quality) {
+  const s = Math.min(1, maxW / rect.w, maxH / rect.h);
+  const cv = document.createElement("canvas");
+  cv.width = Math.max(1, Math.round(rect.w * s));
+  cv.height = Math.max(1, Math.round(rect.h * s));
+  const ctx = cv.getContext("2d");
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(img, rect.x, rect.y, rect.w, rect.h, 0, 0, cv.width, cv.height);
+  // 브라우저의 JPEG 인코더는 baseline JPEG 를 만든다 (기기 디코더가 progressive 는 풀지 못함)
+  return new Promise((resolve, reject) => cv.toBlob(b => b ? resolve(b) : reject(new Error("encode")), "image/jpeg", quality));
+}
+
+// 파일 이름 → 기기에 저장할 이름 (금지 문자 치환, .jpg, 80바이트 이하)
+function jpegName(fileName) {
+  let base = fileName.replace(/\.[^.]*$/, "").replace(/[\/\\:*?"<>|\x00-\x1f]/g, "_").replace(/^[. ]+|[. ]+$/g, "") || "photo";
+  while (new TextEncoder().encode(base).length > 60) base = base.slice(0, -1);
+  return base + ".jpg";
+}
+
+async function uploadFiles(files) {
+  const album = $("album").value;
+  let done = 0;
+  const failed = [];
+  autoMode = null;
+  $("uploadBox").hidden = false;
+  $("addBtn").disabled = true;
+  setMsg($("photoMsg"), "");
+  try {
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      $("uploadBar").max = files.length;
+      $("uploadBar").value = i;
+      $("uploadText").textContent = `${t("uploading")} ${i + 1}/${files.length}: ${f.name}`;
+      let img;
+      try { img = await loadImage(f); } catch (e) { failed.push(`${f.name} (${e.message})`); continue; }
+
+      let rect, mode;
+      if (autoMode) {
+        mode = autoMode === "full" || autoMode === "free" ? autoMode
+             : img.naturalWidth >= img.naturalHeight ? "land" : "port";   // 사진 방향에 맞는 화면 비율
+        rect = defaultRect(img, mode);
+      } else {
+        const action = await showCropper(img, `${i + 1}/${files.length}  ${f.name}`);
+        if (action === "cancel") break;
+        if (action === "skip") continue;
+        rect = crop.rect; mode = crop.mode;
+      }
+      const [maxW, maxH] = AREA[mode] || [FREE_MAX, FREE_MAX];
+      try {
+        const main = await toJpeg(img, rect, maxW, maxH, 0.9);
+        const r = await api("/api/photos/upload?" + q(album, jpegName(f.name)), main, "image/jpeg");
+        const thumb = await toJpeg(img, rect, THUMB_MAX, THUMB_MAX, 0.8);
+        await request("/api/photos/upload?" + q(album, r.name, "&thumb=1"), thumb, "image/jpeg").catch(() => {});
+        done++;
+      } catch (e) {
+        if (handleAuth(e)) return;
+        failed.push(`${f.name} (${errText(e)})`);
+        if (e.status === 0) break;
+      }
+    }
+  } finally {
+    $("uploadBox").hidden = true;
+    $("addBtn").disabled = false;
+    autoMode = null;
+  }
+  const text = `${done} ${t("uploadDone")}` + (failed.length ? `  ${t("uploadFailed")}: ${failed.join(", ")}` : "");
+  await loadAlbums(album).catch(() => {});
+  setMsg($("photoMsg"), text, failed.length ? "warn" : "ok");
+}
+
+// ---- Flickr 피드 ----
+let flickr = null;          // 마지막 GET /api/flickr
+let flickrTimer = null;
+let watchSync = null;       // { since: 요청 전 last_sync, until: 시각 } 동기화가 끝날 때까지 상태를 다시 읽음
+
+async function loadFlickr() {
+  flickr = await api("/api/flickr");
+  const box = $("feeds");
+  box.replaceChildren();
+  if (!flickr.feeds.length) {
+    const p = document.createElement("p"); p.className = "hint"; p.textContent = t("noFeeds");
+    box.append(p);
+  }
+  for (const url of flickr.feeds) {
+    const row = document.createElement("div"); row.className = "feed";
+    const span = document.createElement("span"); span.textContent = url; span.title = url;
+    const del = document.createElement("button"); del.type = "button"; del.textContent = "×";
+    del.onclick = () => removeFeed(url);
+    row.append(span, del);
+    box.append(row);
+  }
+  const s = flickr.status;
+  let text = s.syncing ? t("syncing")
+           : s.last_sync ? `${t("lastSync")}: ${new Date(s.last_sync * 1000).toLocaleString(lang)}` : t("neverSynced");
+  text += `  ·  ${t("images")} ${s.image_count}`;
+  if (s.unsupported) text += `  ·  ${t("unsupported")} ${s.unsupported}`;
+  if (s.error) text += `  ·  ${t("syncError")}: ${s.error}`;
+  $("flickrStatus").textContent = text;
+  $("addFeedBtn").disabled = flickr.feeds.length >= flickr.max_feeds;
+
+  clearTimeout(flickrTimer);
+  if (watchSync && !s.syncing && s.last_sync !== watchSync.since) watchSync = null;   // 끝남
+  if (watchSync && Date.now() > watchSync.until) watchSync = null;
+  if ((s.syncing || watchSync) && tab === "photos") {
+    flickrTimer = setTimeout(() => loadFlickr().catch(() => {}), 3000);
+  }
+}
+
+function startWatch() {
+  watchSync = { since: flickr ? flickr.status.last_sync : 0, until: Date.now() + 5 * 60 * 1000 };
+  setMsg($("flickrMsg"), t("syncRequested"), "ok");
+  setTimeout(() => loadFlickr().catch(() => {}), 1500);
+}
+
+async function saveFeeds(feeds) {
+  try {
+    await api("/api/flickr", { feeds });
+    startWatch();
+    await loadFlickr();
+    return true;
+  } catch (e) {
+    if (!handleAuth(e)) setMsg($("flickrMsg"), errText(e), "err");
+    return false;
+  }
+}
+
+async function addFeed() {
+  const url = $("feedUrl").value.trim();
+  if (!/^https?:\/\/\S+$/.test(url)) { setMsg($("flickrMsg"), t("badFeed"), "err"); return; }
+  if (flickr.feeds.length >= flickr.max_feeds) { setMsg($("flickrMsg"), t("tooManyFeeds").replace("{n}", flickr.max_feeds), "err"); return; }
+  if (flickr.feeds.includes(url)) { $("feedUrl").value = ""; return; }
+  if (await saveFeeds([...flickr.feeds, url])) $("feedUrl").value = "";
+}
+
+async function removeFeed(url) {
+  if (!confirm(`${t("removeFeed")}\n${url}`)) return;
+  await saveFeeds(flickr.feeds.filter(f => f !== url));
+}
+
+async function syncFlickr() {
+  try {
+    await api("/api/flickr/sync", {});
+    startWatch();
+  } catch (e) {
+    if (!handleAuth(e)) setMsg($("flickrMsg"), errText(e), "err");
+  }
+}
+
+$("uiLang").onchange = () => { lang = $("uiLang").value; store.set("lang", lang); applyLang(); refreshStatus().catch(() => {}); };
+
+// ---- 시작 ----
+(async () => {
+  applyLang();
+  if (!pin) { show("login"); return; }
+  try {
+    await refreshStatus();
+    await loadSettings();
+    show("app");
+    showTab(tab);
+  } catch (e) {
+    if (e.status === 401) { logout(); return; }
+    show("login");
+    setMsg($("loginMsg"), errText(e), "err");
+  }
+})();
+setInterval(() => { if (!$("app").hidden && tab === "settings") refreshStatus().catch(() => {}); }, 10000);
+</script>
+</body>
+</html>

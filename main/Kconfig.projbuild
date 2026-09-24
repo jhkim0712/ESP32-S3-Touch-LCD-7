@@ -93,16 +93,13 @@ menu "Smart Display Configuration"
             int "Slideshow interval (seconds)"
             range 3 3600
             default 10
-    endmenu
-
-    menu "Development"
-        config APP_UI_DEMO_DATA
-            bool "Feed demo data to the UI"
-            default y
+        config APP_FLICKR_SYNC_MIN
+            int "Flickr feed sync interval (minutes)"
+            range 10 1440
+            default 60
             help
-                Shows a simulated OTA update popup 30 s after boot so the popup
-                can be checked before the OTA service exists (step 6).
-                Everything else always uses the real services.
+                Feeds are added in the web settings page (Photos tab). Images are
+                mirrored to <photo dir>/flickr/<feed hash>/ on the SD card.
     endmenu
 
     menu "OTA (GitHub Releases)"

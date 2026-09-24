@@ -42,6 +42,10 @@ ESP32-S3-Touch-LCD-7/
 │   │
 │   ├── ota/          [OTA]      github_ota.c  Releases API, semver, esp_https_ota, rollback
 │   │
+│   ├── app_flickr/   [Network]  app_flickr.c  Flickr 피드 → SD 미러 (net_worker 에서 호출)
+│   │
+│   ├── web/          [Network]  web_server.c  esp_http_server + REST API + mDNS, www/index.html (gzip 내장)
+│   │
 │   └── ui/           [UI]
 │       ├── ui_core.c            esp_lvgl_port 초기화, APP_EVENT → lv_subject 갱신, 모드 전환
 │       ├── ui_theme.c           색상, 카드 스타일, 숫자 포맷
@@ -99,6 +103,8 @@ ESP32-S3-Touch-LCD-7/
 | `ota_task` | 0 | 4 | 8 KB | 승인 후 다운로드·플래시 쓰기 |
 | `lvgl` (esp_lvgl_port) | 1 | 4 | 8 KB | 렌더링, 입력, 타이머(시계 1초 갱신) |
 | `photo_loader` | 1 | 2 | 6 KB | 파일 읽기, JPEG 디코딩(LVGL 유휴 시간 사용) |
+| `httpd` (웹 설정) | 0 | 5 | 6 KB (내부 RAM: NVS 쓰기) | 웹 페이지, REST API. 동시 연결 3개 |
+| `mdns` | 0 | 1 | 4 KB (PSRAM) | `smart-display.local` 응답 |
 
 **HTTPS를 한 태스크에서 직렬 처리하는 이유:** TLS 세션 하나는 내부 RAM 수십 KB를 씁니다. RGB bounce buffer(약 32KB), Wi-Fi, BLE와 함께 동시에 여러 세션을 열면 내부 RAM이 부족해집니다.
 
@@ -148,32 +154,73 @@ net_worker(core0) ─ http_get_alloc(open-meteo) ─ cJSON 파싱 ─ app_state_
   바꾸면 현재 화면을 다시 만들어 바로 적용합니다(재부팅 불필요). 날짜 형식("9월 23일 (수)"), 날씨 상태 문구도 함께 바뀝니다.
 - **날씨 아이콘:** 상태별 색 원 대신 PNG 아이콘을 LittleFS 에 넣어 표시합니다.
 
-## 2.8 웹 UI, 사진 업로드, RSS 이미지 동기화 (5-7 ~ 5-9)
+## 2.8 웹 UI, 사진 업로드, Flickr 사진 동기화 (5-7 ~ 5-9)
 
 같은 공유기에 연결된 PC/휴대폰 브라우저에서 `http://smart-display.local` (mDNS) 또는 IP 로 접속합니다.
 
-**웹 서버 (5-7)**
-- `esp_http_server` (HTTP, 같은 네트워크 전용) + `espressif/mdns`. 서버 태스크는 core 0, 내부 RAM 사용을 줄이기 위해 동시 연결 수를 작게 둡니다.
-- 페이지(HTML/JS/CSS)는 gzip 으로 압축해 LittleFS 에 넣고, 설정은 JSON REST API 로 주고받습니다
-  (`GET/POST /api/settings`, `POST /api/wifi/scan`, `GET /api/status`). 저장하면 기기 화면과 같은 `APP_EVT_SETTINGS_CHANGED` 흐름을 탑니다.
-- 접근 보호: 기기 화면에 표시되는 PIN 을 처음 접속할 때 입력 (같은 네트워크의 다른 사람이 설정을 바꾸지 못하도록).
+**웹 서버 (5-7, 구현됨: `components/web`)**
+- `esp_http_server` (HTTP, 같은 네트워크 전용) + `espressif/mdns`. 서버 태스크는 core 0, 동시 연결은 3개
+  (넘치면 가장 오래된 연결을 닫음). mDNS 태스크와 버퍼는 PSRAM 에 둡니다.
+- 페이지는 `www/index.html` 한 파일(HTML/CSS/JS, 한국어/English)입니다. 빌드할 때 gzip 으로 압축해 **펌웨어에 내장**합니다.
+  처음 계획은 LittleFS 였지만, OTA 는 앱 파티션만 바꾸므로 LittleFS 에 두면 업데이트 뒤 페이지와 API 버전이 어긋날 수 있습니다.
+- 설정은 JSON REST API 로 주고받습니다: `GET /api/status`, `GET/POST /api/settings`, `POST /api/wifi/scan`, `POST /api/restart`.
+  `POST /api/settings` 는 보낸 항목만 바꾸고, Wi-Fi 비밀번호는 읽을 수 없습니다(설정 여부만 반환).
+  저장하면 `APP_EVT_SETTINGS_CHANGED` (data: `APP_SETTINGS_SRC_WEB`) 를 보내고, 서비스는 기기 설정 화면과 같은 방식으로 다시 읽습니다.
+  UI 는 언어와 화면 모드를 바로 적용하고, 기기 설정 화면이 열려 있으면 이전 값으로 다시 저장되지 않도록 홈으로 돌아갑니다.
+- 접근 보호: 모든 `/api` 요청에 `X-PIN` 헤더가 필요합니다. PIN(6자리)은 처음 부팅할 때 무작위로 만들어 NVS 에 저장하고,
+  기기 설정 화면의 "웹 설정" 항목에 주소와 함께 표시합니다. 브라우저는 PIN 을 localStorage 에 기억합니다.
+  5번 틀리면 30초 동안 모든 요청을 거부합니다. HTTP 이므로 같은 네트워크 안에서 사용하는 것을 전제로 합니다.
 
-**사진 업로드 + 자르기 (5-8)**
-- 여러 파일을 한 번에 선택하면 브라우저가 한 장씩 자르기 화면을 보여 주고(비율: 화면 가로/세로/자유),
-  **자르기와 크기 조정, JPEG 인코딩을 브라우저에서 처리**한 뒤 작은 baseline JPEG 로 올립니다.
+**사진 업로드 + 자르기 (5-8, 구현됨: `web/web_photos.c`, 웹 페이지 "사진" 탭)**
+- 여러 파일을 한 번에 선택하면 브라우저가 한 장씩 자르기 화면을 보여 줍니다.
+  비율: 화면 가로(800x432), 화면 세로(480x752), 자유, 전체. 이 크기는 상태 표시줄을 뺀 기기의 사진 영역이라 기기에서 다시 줄이지 않습니다.
+  [나머지는 자동]을 누르면 남은 사진은 사진 방향에 맞는 화면 비율로 가운데를 잘라 올립니다.
+- **자르기와 크기 조정, JPEG 인코딩을 브라우저(canvas)에서 처리**한 뒤 baseline JPEG 로 올립니다.
   → 기기에서 못 푸는 progressive JPEG, 큰 PNG, 아이폰 HEIC(사파리에서 열 때) 문제가 업로드 단계에서 해결되고, SD 에서 읽는 시간도 짧아집니다.
-- 업로드는 한 파일씩 순서대로 `POST /api/photos?album=...` 로 SD 에 바로 기록 (임시 파일 → 완료 후 이름 변경).
-- 앨범(폴더) 목록, 사진 썸네일 보기, 삭제 기능 포함. 업로드가 끝나면 전자앨범 목록을 다시 읽습니다.
+  EXIF 방향은 브라우저가 적용해 그립니다.
+- 업로드는 한 파일씩 순서대로 `POST /api/photos/upload?album=&name=` 로 SD 에 바로 기록 (`.part` 임시 파일 → 완료 후 이름 변경,
+  같은 이름이 있으면 `이름-1.jpg`). 이어서 240px 썸네일을 `<앨범>/.thumbs/` 에 올립니다 (전자앨범은 `.` 폴더를 건너뜀).
+- 앨범 = 사진 폴더 바로 아래 폴더. 앨범 목록/선택/새 앨범, 썸네일 보기(60장씩), 삭제. 마지막 사진을 지우면 앨범 폴더도 지웁니다.
+  PC 에서 직접 넣은 사진은 썸네일이 없어 원본을 받아 표시합니다.
+- 업로드/삭제 후 3초 동안 더 바뀌지 않으면 `APP_EVT_REQ_PHOTO_RESCAN` → `photo_loader` 가 목록을 다시 읽습니다 (표시 중인 사진은 유지).
+- 전자앨범이 읽고 있는 파일을 지우지 않도록 FatFs 파일 잠금(`CONFIG_FATFS_FS_LOCK`)을 켰습니다. 이때 삭제는 `409 busy` 가 되고 브라우저가 잠시 후 다시 시도합니다.
 
-**RSS 이미지 피드 동기화 (5-9)**
-- 웹 UI(또는 기기 설정)에서 피드 URL 을 등록하면 주기적으로(기본 1시간) 받아와 새 이미지를
-  `/sdcard/photos/rss/<피드 이름>/` 에 저장합니다. 피드별 최대 보관 장수를 넘으면 오래된 것부터 지웁니다.
-- 이미지 URL 추출: `<enclosure type="image/*">`, `<media:content>`, `<media:thumbnail>`, 본문의 `<img src>` (RSS 2.0 / Atom).
-- 피드 XML 은 클 수 있어서 전체를 메모리에 올리지 않고 스트리밍으로 태그만 찾습니다. 받은 URL 목록은 인덱스 파일에 남겨 중복 다운로드를 막습니다.
-- HTTPS 요청은 기존 `net_worker` 에서 날씨/주가와 순서대로 처리합니다 (TLS 세션 동시 1개 유지).
-- **제약:** 웹에서 받은 이미지는 progressive JPEG 인 경우가 많은데 기기 디코더가 풀지 못합니다.
-  받은 뒤 헤더를 검사해 표시할 수 없는 파일은 건너뛰고 웹 UI 에 개수를 보여 줍니다.
-  (피드가 여러 크기의 이미지를 제공하면 작은 것을 우선 선택)
+**Flickr 피드 사진 동기화 (5-9, 구현됨: `components/app_flickr`, 웹 페이지 "사진" 탭의 Flickr 카드)**
+
+다른 비슷한 프로젝트(480x320 보드)의 `app_flickr` 를 가져와 이 프로젝트 구조에 맞게 옮겼습니다.
+
+- 동작: 웹 UI 에서 Flickr 피드 URL(RSS 2.0/Atom, 예:
+  `https://www.flickr.com/services/feeds/photos_public.gne?id=<사용자 ID>&format=rss2`)을 추가하면,
+  주기적으로(`CONFIG_APP_FLICKR_SYNC_MIN`, 기본 1시간, 실패 시 10분 후) 피드를 받아 게시물 이미지를
+  `/sdcard/photos/flickr/<피드 URL 해시>/` 에 저장합니다. 전자앨범은 하위 폴더를 이미 탐색하므로 다른 사진과 함께 표시됩니다.
+- 폴더는 피드의 **미러**입니다: 피드에서 빠진 이미지는 지우고, 피드를 삭제하면 그 폴더도 지웁니다.
+  그래서 웹 사진 관리에서는 `flickr` 폴더를 앨범 목록에서 빼고, 그 안으로 올리거나 지우는 요청도 거부합니다.
+- 이미지 URL: `<media:content url>` → `<enclosure url>` → Atom `<link rel="enclosure" href>` 순서로 찾습니다.
+  staticflickr.com 의 1024px(`_b`) 주소는 800px(`_c`)로 바꿔 받고, 없으면 원래 주소로 받습니다 (원본 코드는 480x320 용 640px `_z`).
+- 받는 중인 파일은 `.part` 로 쓰고 완료 후 이름을 바꿉니다. 피드는 256KB, 이미지는 4MB 까지만 받습니다.
+
+원본에서 바꾼 부분:
+
+| 원본 | 이 프로젝트 |
+|---|---|
+| `app_config` 의 `flickr_feeds` | `settings_get/set_flickr_feeds()` (NVS 키 `flickr`, 줄바꿈 구분, 최대 8개 x 255자). `app_settings_t` 는 작은 스택에 자주 복사되므로 따로 둠 |
+| 자체 `flickr` 태스크 (8KB 스택, 5초 폴링) | 태스크 없음. `net_worker` 가 날씨/주가 다음에 `app_flickr_sync()` 호출 → TLS 세션 1개 유지, 내부 RAM 8KB 절약 |
+| `app_flickr_request_sync()` | `APP_EVT_REQ_FLICKR_SYNC` 이벤트 (웹에서 피드 변경/[지금 동기화], Wi-Fi 연결 직후) |
+| `app_wifi_is_connected()` | Wi-Fi 가 끊겨 있으면 `app_flickr_sync(false)`: 네트워크 없이 삭제된 피드의 폴더만 정리 |
+| `app_photo_scan()` + `bsp_display_lock()` | 바뀐 것이 있으면 `APP_EVT_REQ_PHOTO_RESCAN` → `photo_loader` 가 다시 탐색 |
+| `bsp_*`, `BSP_SD_MOUNT_POINT` | `board_sdcard_is_mounted()`, `CONFIG_APP_PHOTO_DIR` |
+| 피드 받기 (`esp_http_client` open/read) | `net` 의 `http_get_alloc()` (이미지는 원본대로 SD 에 바로 스트리밍) |
+| 큰 배열이 스택에 (`orphans` 1.5KB 등) | PSRAM 버퍼 (net_worker 스택은 TLS 때문에 내부 RAM) |
+| GIF/BMP 도 받음 | 전자앨범이 표시할 수 있는 JPG/PNG 만 |
+
+웹 UI / API:
+- 피드 목록 추가/삭제, 동기화 상태(진행 중, 마지막 동기화 시각, 사진 수, 표시할 수 없는 사진 수, 오류), [지금 동기화] 버튼
+- `GET/POST /api/flickr` (피드 목록 + 상태), `POST /api/flickr/sync`
+- 피드를 바꾸면 바로 동기화해 새 피드는 곧 나타나고 삭제한 피드의 사진은 곧 사라집니다.
+
+**제약:** 기기 JPEG 디코더는 progressive JPEG 를 풀지 못합니다. 받은 파일의 헤더(SOF 마커)를 확인해 개수를 웹 UI 에 보여 줍니다.
+파일은 남겨 두어(다시 받지 않도록) 전자앨범이 건너뜁니다.
+전자앨범이 읽고 있는 파일은 FatFs 파일 잠금 때문에 지워지지 않고 다음 동기화 때 지워집니다.
 
 ## 2.9 단계별 구현 로드맵
 
@@ -189,5 +236,5 @@ net_worker(core0) ─ http_get_alloc(open-meteo) ─ cJSON 파싱 ─ app_state_
 | 5-6 | 한글 폰트 + 언어 설정 + 날씨 아이콘 (위 2.7 참고) |
 | 5-7 | 웹 UI: 브라우저에서 설정 (아래 2.8 참고) |
 | 5-8 | 웹 UI: 사진 업로드 (여러 장 동시) + 브라우저에서 자르기(crop) |
-| 5-9 | RSS 이미지 피드 동기화 → SD 카드 저장 |
+| 5-9 | `app_flickr` 이식: 웹 UI 에 Flickr 피드(RSS 2.0) 등록 → `net_worker` 가 주기적으로 이미지를 SD 카드에 저장 → 전자앨범에 표시 (위 2.8 참고) |
 | 6 | `ota` + GitHub Actions 릴리스 워크플로 (웹 UI 에서도 업데이트 확인/실행) |

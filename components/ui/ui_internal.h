@@ -26,6 +26,7 @@ extern const lv_font_t *ui_font_weather_l, *ui_font_weather_s;
 
 // ---- 언어 ----
 app_lang_t ui_lang(void);       // 한글 폰트가 없으면 항상 APP_LANG_EN
+app_lang_t ui_lang_setting(void);   // 설정값 그대로 (폰트 유무와 무관)
 #define TR(en, ko)          (ui_lang() == APP_LANG_KO ? (ko) : (en))
 // 날짜: long_form = "2026년 9월 23일 수요일" / "Wednesday, 23 September 2026"
 //       short     = "9월 23일 (수)"          / "Wed 23 Sep"

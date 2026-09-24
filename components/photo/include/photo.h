@@ -4,7 +4,7 @@
 //   - JPEG: ROM TJpgDec 로 파일을 조금씩 읽으며 바로 축소 → 수 MB 사진도 메모리에 올리지 않음
 //           EXIF 방향(휴대폰 세로 사진) 반영, progressive JPEG 는 미지원
 //   - PNG : LVGL 의 lodepng 사용, 전체를 메모리에 풀어야 하므로 800x600 이하만
-// 요청 이벤트: APP_EVT_REQ_PHOTO_NEXT / _PREV, APP_EVT_SETTINGS_CHANGED(간격)
+// 요청 이벤트: APP_EVT_REQ_PHOTO_NEXT / _PREV / _RESCAN, APP_EVT_SETTINGS_CHANGED(간격)
 #pragma once
 
 #include <stdint.h>

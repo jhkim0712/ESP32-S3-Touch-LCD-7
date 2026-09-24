@@ -51,6 +51,11 @@ void ui_lang_set(app_lang_t lang)
     s_lang = lang;
 }
 
+app_lang_t ui_lang_setting(void)
+{
+    return s_lang;
+}
+
 app_lang_t ui_lang(void)
 {
     return s_korean_font ? s_lang : APP_LANG_EN;

@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "main.cpp" "demo_data.c"
+    SRCS "main.cpp"
     INCLUDE_DIRS "."
-    REQUIRES board storage app_core net services media_ble photo ota ui nvs_flash esp_app_format
+    REQUIRES board storage app_core net services media_ble photo ota ui web app_flickr nvs_flash esp_app_format
 )

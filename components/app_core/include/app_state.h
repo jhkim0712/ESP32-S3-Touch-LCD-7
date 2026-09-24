@@ -37,10 +37,18 @@ typedef enum {
     APP_EVT_REQ_BLE_UNPAIR,      // 저장된 BLE 페어링 모두 삭제
     APP_EVT_REQ_PHOTO_NEXT,
     APP_EVT_REQ_PHOTO_PREV,
+    APP_EVT_REQ_PHOTO_RESCAN,    // SD 카드 사진이 추가/삭제됨 (웹 업로드, 피드 동기화) → 목록 다시 읽기
+    APP_EVT_REQ_FLICKR_SYNC,     // Flickr 피드 목록이 바뀜 / [지금 동기화] → net_worker 가 바로 동기화
     APP_EVT_REQ_OTA_START,       // 팝업에서 "업데이트" 선택
     APP_EVT_UI_MODE_CHANGED,     // data: ui_mode_t (app_storage.h) → 설정 저장
-    APP_EVT_SETTINGS_CHANGED,    // 설정 페이지에서 저장됨 → 서비스가 settings_load() 로 다시 읽음
+    APP_EVT_SETTINGS_CHANGED,    // 설정 저장됨 → 서비스가 settings_load() 로 다시 읽음
+                                 // data: app_settings_src_t (없으면 기기 설정 페이지)
 } app_event_id_t;
+
+typedef enum {
+    APP_SETTINGS_SRC_DEVICE = 0,   // 기기 설정 페이지
+    APP_SETTINGS_SRC_WEB    = 1,   // 웹 설정 페이지 → UI 가 언어/모드를 적용하고 열린 설정 화면을 닫음
+} app_settings_src_t;
 
 #define APP_MAX_STOCKS  8
 #define APP_MAX_WIFI_AP 16
