@@ -43,7 +43,7 @@ static const char *TAG = "photo_feed";
 #define FEED_MAX_LEN      (512 * 1024)          /* feeds with full article HTML can be a few hundred KB */
 #define IMAGE_MAX_LEN     (4 * 1024 * 1024)     /* refuse anything absurd rather than fill the card */
 #define MAX_ITEMS         50                    /* per feed - Flickr's own feeds return 20 */
-#define URL_MAX           SETTINGS_FEED_URL_MAX
+#define URL_MAX           1024                  /* image URLs, not feed URLs: signed CDN links (Instagram) run 600-700 chars */
 #define NAME_MAX_LEN      96
 #define PATH_MAX_LEN      (sizeof(FEEDS_DIR) + 10 + NAME_MAX_LEN + 8)
 #define MAX_REDIRECTS     5
@@ -51,6 +51,14 @@ static const char *TAG = "photo_feed";
 #define MAX_ORPHAN_DIRS   16
 #define USER_AGENT        "Mozilla/5.0 (ESP32-S3; SmartDisplay)"
 #define SKIP_EXT          ".skip"
+#define BACKUP_EXT        ".prog.part"          /* ".part": prune_dir() sweeps up one left by a power cut */
+
+/* The photo frame's decoder can't do progressive JPEGs, and some CDNs
+ * (Instagram) serve nothing else - behind signed URLs that can't be tweaked
+ * into asking for a baseline file. wsrv.nl re-encodes them as a baseline JPEG,
+ * scaled to fit the panel either way round. */
+#define BASELINE_PROXY    "https://wsrv.nl/?w=800&h=800&fit=inside&output=jpg&q=85&url="
+#define PROXY_URL_MAX     (2 * URL_MAX)
 
 static SemaphoreHandle_t s_lock;
 static photo_feed_status_t s_status;
@@ -69,12 +77,15 @@ static char (*s_orphans)[NAME_MAX_LEN];
  * (they were ~1.3KB there and overflowed the stack). */
 typedef struct {
     char small_url[URL_MAX];
+    char proxy_url[PROXY_URL_MAX];
     char stem[NAME_MAX_LEN];
     char orig_stem[NAME_MAX_LEN];
     char found[NAME_MAX_LEN];
     char dir[PATH_MAX_LEN];
     char path[PATH_MAX_LEN + NAME_MAX_LEN + 8];        /* dir + "/" + file name */
     char part_path[PATH_MAX_LEN + NAME_MAX_LEN + 8];
+    char backup_path[PATH_MAX_LEN + NAME_MAX_LEN + 8];
+    char proxy_name[NAME_MAX_LEN];
 } scratch_t;
 static scratch_t *s_scratch;
 
@@ -452,9 +463,10 @@ static esp_http_client_handle_t http_open(const char *url, int *out_status)
         .crt_bundle_attach = esp_crt_bundle_attach,
         .timeout_ms = 15000,
         /* CDNs send some long header lines (CSP, cookies) - the 512-byte
-         * default buffers are too tight for them. */
+         * default buffers are too tight for them. The request line holds the
+         * whole URL - up to PROXY_URL_MAX for a baseline-proxy request. */
         .buffer_size = 2048,
-        .buffer_size_tx = 1024,
+        .buffer_size_tx = PROXY_URL_MAX + 512,
         .user_agent = USER_AGENT,
     };
     esp_http_client_handle_t client = esp_http_client_init(&config);
@@ -610,6 +622,74 @@ static esp_err_t download_to_file(const char *url, const char *dir, const char *
     }
     ESP_LOGI(TAG, "Downloaded %s (%d bytes)", s_scratch->path, total);
     return ESP_OK;
+}
+
+/* BASELINE_PROXY + `url` percent-encoded as its query value.
+ * @return false if it doesn't fit in out_len. */
+static bool build_proxy_url(const char *url, char *out, size_t out_len)
+{
+    static const char hex[] = "0123456789ABCDEF";
+    size_t len = strlcpy(out, BASELINE_PROXY, out_len);
+    for (const char *p = url; *p; p++) {
+        unsigned char c = (unsigned char)*p;
+        bool plain = isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~';
+        if (len + (plain ? 1 : 3) >= out_len) {
+            return false;
+        }
+        if (plain) {
+            out[len++] = (char)c;
+        } else {
+            out[len++] = '%';
+            out[len++] = hex[c >> 4];
+            out[len++] = hex[c & 0x0F];
+        }
+    }
+    out[len] = '\0';
+    return true;
+}
+
+/* If "<dir>/<name>" is a progressive JPEG, swaps it for a baseline copy of
+ * `url` fetched through BASELINE_PROXY. The original is set aside first and
+ * only deleted once the copy is in place - if the proxy fails, it's put back
+ * (and counted as unsupported), and the next sync tries again.
+ * @return true if the file was replaced. */
+static bool make_baseline(const char *url, const char *dir, const char *name)
+{
+    char *path = s_scratch->path;
+    snprintf(path, sizeof(s_scratch->path), "%s/%s", dir, name);
+    if (!jpeg_is_progressive(path) || !build_proxy_url(url, s_scratch->proxy_url, PROXY_URL_MAX)) {
+        return false;
+    }
+
+    char *stem = s_scratch->proxy_name;
+    strlcpy(stem, name, NAME_MAX_LEN);
+    *strrchr(stem, '.') = '\0';
+    char *backup = s_scratch->backup_path;
+    int backup_len = snprintf(backup, sizeof(s_scratch->backup_path), "%s/%s%s", dir, stem, BACKUP_EXT);
+    if (backup_len < 0 || (size_t)backup_len >= sizeof(s_scratch->backup_path)) {
+        return false;
+    }
+    remove(backup);
+    if (rename(path, backup) != 0) {
+        return false;   /* e.g. the photo frame has it open right now */
+    }
+
+    char new_name[NAME_MAX_LEN];
+    esp_err_t err = download_to_file(s_scratch->proxy_url, dir, stem, new_name, sizeof(new_name));
+    if (err == ESP_OK && strcmp(new_name, name) == 0) {
+        remove(backup);
+        ESP_LOGI(TAG, "%s/%s: progressive JPEG replaced with a baseline copy", dir, name);
+        return true;
+    }
+    if (err == ESP_OK || err == ESP_ERR_NOT_SUPPORTED) {
+        /* not the JPEG asked for (a .png or a .skip marker) - drop it */
+        snprintf(path, sizeof(s_scratch->path), "%s/%s", dir, new_name);
+        remove(path);
+    }
+    snprintf(path, sizeof(s_scratch->path), "%s/%s", dir, name);
+    rename(backup, path);
+    ESP_LOGW(TAG, "Baseline proxy failed for %s/%s, keeping the progressive JPEG", dir, name);
+    return false;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -834,6 +914,8 @@ static esp_err_t sync_feed(const char *feed_url, const char *dir, sync_counts_t 
         }
 
         if (kept) {
+            /* also retries ones kept from an earlier sync whose proxy fetch failed */
+            io->changed |= make_baseline(orig_url, dir, found);
             strlcpy(s_keep[keep_count++], found, NAME_MAX_LEN);
             count_kept(dir, found, io);
         } else {
