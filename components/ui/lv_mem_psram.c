@@ -9,6 +9,7 @@
 
 #if LV_USE_STDLIB_MALLOC == LV_STDLIB_CUSTOM
 
+#include <string.h>
 #include "esp_heap_caps.h"
 
 #define LV_HEAP_CAPS    (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
@@ -39,10 +40,24 @@ void *lv_malloc_core(size_t size)
     return p ? p : heap_caps_malloc(size, MALLOC_CAP_8BIT);
 }
 
+// heap_caps_realloc 은 블록을 옮길 때 복사를 힙 잠금(인터럽트 금지) 안에서 한다. PNG 디코딩(lodepng)
+// 처럼 큰 버퍼를 늘리면 그동안 RGB LCD 의 bounce buffer 인터럽트가 밀려 화면이 깨진다.
+// 그래서 큰 블록은 새로 잡고 잠금 밖에서 복사한다. 작은 블록은 복사가 짧으므로 그대로 둔다.
+#define LV_REALLOC_COPY_MIN     (4 * 1024)
+
 void *lv_realloc_core(void *p, size_t new_size)
 {
-    void *n = heap_caps_realloc(p, new_size, LV_HEAP_CAPS);
-    return n ? n : heap_caps_realloc(p, new_size, MALLOC_CAP_8BIT);
+    size_t old_size = p ? heap_caps_get_allocated_size(p) : 0;
+    if (!p || new_size == 0 || (old_size < LV_REALLOC_COPY_MIN && new_size < LV_REALLOC_COPY_MIN)) {
+        void *n = heap_caps_realloc(p, new_size, LV_HEAP_CAPS);
+        return n || new_size == 0 ? n : heap_caps_realloc(p, new_size, MALLOC_CAP_8BIT);
+    }
+    void *n = lv_malloc_core(new_size);
+    if (n) {
+        memcpy(n, p, old_size < new_size ? old_size : new_size);
+        heap_caps_free(p);
+    }
+    return n;
 }
 
 void lv_free_core(void *p)

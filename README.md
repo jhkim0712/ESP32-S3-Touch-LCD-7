@@ -6,7 +6,7 @@
 | 기능 | 내용 |
 |---|---|
 | 시계 | Wi-Fi 연결 후 NTP로 KST(UTC+9) 동기화, 아날로그/디지털 시계 |
-| 전자앨범 | SD 카드의 JPG/PNG 슬라이드쇼 (PSRAM에서 미리 디코딩). 웹에서 사진 업로드(자르기)/삭제, 사진 RSS 피드(Flickr 등) 자동 동기화 |
+| 전자앨범 | SD 카드의 JPG/PNG 슬라이드쇼 (PSRAM에서 미리 디코딩). 웹에서 사진 업로드(자르기)/삭제, 사진 RSS 피드(Flickr 등) 자동 동기화, 게시물 글을 사진 아래에 표시 |
 | 날씨 | 현재 기온, 습도, 날씨 아이콘. 설정(기기/웹)에 OpenWeatherMap API 키와 도시(ID 또는 이름)를 넣으면 OpenWeatherMap, 없으면 Open-Meteo(키 불필요, menuconfig 좌표) |
 | 주가 | Yahoo Finance로 AAPL, NVDA, KOSPI(`^KS11`) 등 시세와 등락률 표시 |
 | 음악 리모컨 | BLE로 스마트폰 음악 제어 (iOS: AMS / Android: 미디어 키). 내부 RAM 부족으로 **기본 비활성**, menuconfig `CONFIG_APP_BLE_MEDIA` 로 켤 수 있음 |
@@ -82,7 +82,7 @@ python -m esptool --chip esp32s3 -p COMx -b 460800 write-flash --flash-mode dio 
 처음 접속할 때 기기 설정 화면(톱니바퀴) > **웹 설정**에 표시된 6자리 PIN 을 입력합니다. PIN 은 처음 부팅할 때 무작위로 만들어 NVS 에 저장됩니다.
 Wi-Fi, 언어, 화면 모드, 회전, 사진 전환 간격, 주식 종목을 바꿀 수 있고, 기기를 다시 시작할 수도 있습니다.
 **사진** 탭에서는 SD 카드 폴더(하위 폴더 4단계까지)를 오가며 사진을 보고 지울 수 있고, 여러 장을 골라 브라우저에서 자른 뒤(화면 가로/세로/자유) 올릴 수 있습니다.
-이미지가 들어 있는 RSS 2.0/Atom 피드(Flickr 등) 주소를 등록하면 1시간마다 새 사진을 `photos/feeds/` 에 받아 전자앨범에 함께 표시합니다 (이 폴더는 피드와 똑같이 유지되므로 직접 파일을 넣지 마세요. 웹에서는 보기만 가능).
+이미지가 들어 있는 RSS 2.0/Atom 피드(Flickr 등) 주소를 등록하면 1시간마다 새 사진을 `photos/feeds/` 에 받아 전자앨범에 함께 표시합니다. 게시물 글(제목)은 JPEG 의 EXIF 설명에 넣어 사진 아래에 보여 줍니다 (이 폴더는 피드와 똑같이 유지되므로 직접 파일을 넣지 마세요. 웹에서는 보기만 가능).
 페이지는 `components/web/www/index.html` 이며 빌드할 때 gzip 으로 압축해 펌웨어에 넣습니다.
 
 ## 폰트 (LittleFS)

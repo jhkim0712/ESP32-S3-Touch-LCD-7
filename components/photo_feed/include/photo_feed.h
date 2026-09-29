@@ -25,6 +25,12 @@
  * costs tens of KB of internal RAM). Request an immediate sync by posting
  * APP_EVT_REQ_FEED_SYNC (after the feed list changes).
  *
+ * The post's text - the item's <title>, else its description/summary/content
+ * reduced to plain text (emoji dropped, at most 255 bytes) - is stored in each
+ * JPEG as its EXIF ImageDescription (UTF-8), which the slideshow shows under
+ * the photo. That EXIF block keeps only the text and the Orientation; it is
+ * rewritten whenever the post's text changes. PNGs get no text.
+ *
  * Flickr image URLs are rewritten from the feed's 1024px ("_b") size to 800px
  * ("_c") to match the 800x480 panel and keep downloads small.
  */

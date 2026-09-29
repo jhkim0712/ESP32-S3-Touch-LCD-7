@@ -208,6 +208,9 @@ v0.2.3 에서 일반 RSS 2.0 / Atom 이미지 피드를 받도록 넓히면서 �
 - 동기화는 자체 태스크 없이 `net_worker` 가 날씨/주가 다음에 `photo_feed_sync()` 로 실행합니다 (TLS 세션 1개 유지).
   Wi-Fi 가 끊겨 있으면 `photo_feed_sync(false)`: 네트워크 없이 삭제된 피드의 폴더만 정리합니다.
   바뀐 것이 있으면 `APP_EVT_REQ_PHOTO_RESCAN` → `photo_loader` 가 다시 탐색합니다.
+- 게시물 글: 항목의 `<title>`, 없으면 description/summary/content 를 태그와 이모지를 뺀 한 줄 텍스트(최대 255바이트)로 만들어
+  JPEG 의 EXIF ImageDescription(UTF-8)에 넣습니다. 이 EXIF 는 글과 방향(Orientation)만 담고, 글이 바뀔 때만 `.part` 로 다시 씁니다.
+  `photo_loader` 가 디코딩할 때 읽어 슬라이드쇼 사진 아래에 표시합니다 (없으면 파일 이름). PNG 에는 넣지 않습니다.
 - 피드 목록은 NVS 키 `feeds` (줄바꿈 구분, 최대 8개 x 255자). `app_settings_t` 는 작은 스택에 자주 복사되므로 따로 둡니다.
 
 v0.2.2 (`app_flickr`) 에서 업데이트할 때:

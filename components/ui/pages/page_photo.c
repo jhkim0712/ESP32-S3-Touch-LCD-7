@@ -25,6 +25,7 @@ static void photo_cb(lv_observer_t *o, lv_subject_t *s)
         lv_obj_add_flag(v->image, LV_OBJ_FLAG_HIDDEN);
         lv_obj_remove_flag(v->placeholder, LV_OBJ_FLAG_HIDDEN);
         lv_label_set_text(v->caption, "");
+        lv_obj_add_flag(v->caption, LV_OBJ_FLAG_HIDDEN);
         return;
     }
 
@@ -46,8 +47,12 @@ static void photo_cb(lv_observer_t *o, lv_subject_t *s)
     lv_obj_remove_flag(v->image, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(v->placeholder, LV_OBJ_FLAG_HIDDEN);
 
+    // 사진 설명(RSS 게시물 글 등)이 있으면 그것을, 없으면 파일 이름을 보여 준다
     const char *name = strrchr(f->path, '/');
-    lv_label_set_text(v->caption, name ? name + 1 : f->path);
+    bool has_caption = f->caption[0] != '\0';
+    lv_label_set_text(v->caption, has_caption ? f->caption : name ? name + 1 : f->path);
+    lv_obj_set_style_text_color(v->caption, has_caption ? UI_COLOR_TEXT : UI_COLOR_DIM, 0);
+    lv_obj_remove_flag(v->caption, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void on_tap(lv_event_t *e)
@@ -82,7 +87,18 @@ void ui_photo_create(lv_obj_t *parent)
     lv_obj_set_style_text_align(v->placeholder, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_center(v->placeholder);
 
+    // 사진 위에 반투명 상자: 긴 글은 두 줄까지 줄바꿈하고 넘치면 ... 으로 줄인다
     v->caption = ui_label(parent, UI_FONT_S, UI_COLOR_DIM, "");
+    lv_label_set_long_mode(v->caption, LV_LABEL_LONG_MODE_DOTS);
+    lv_obj_set_style_text_align(v->caption, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_max_width(v->caption, LV_PCT(80), 0);
+    lv_obj_set_style_pad_hor(v->caption, 12, 0);
+    lv_obj_set_style_pad_ver(v->caption, 4, 0);
+    lv_obj_set_style_max_height(v->caption, 2 * lv_font_get_line_height(UI_FONT_S) + 2 * 4, 0);
+    lv_obj_set_style_bg_color(v->caption, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(v->caption, LV_OPA_50, 0);
+    lv_obj_set_style_radius(v->caption, 8, 0);
+    lv_obj_add_flag(v->caption, LV_OBJ_FLAG_HIDDEN);
     lv_obj_align(v->caption, LV_ALIGN_BOTTOM_MID, 0, -30);
 
     lv_subject_add_observer_obj(&ui_subj_photo, photo_cb, parent, NULL);

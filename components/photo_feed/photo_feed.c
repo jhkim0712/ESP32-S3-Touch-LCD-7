@@ -19,6 +19,7 @@
 #include <strings.h>
 #include <ctype.h>
 #include <inttypes.h>
+#include <limits.h>
 #include <dirent.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -45,6 +46,7 @@ static const char *TAG = "photo_feed";
 #define MAX_ITEMS         50                    /* per feed - Flickr's own feeds return 20 */
 #define URL_MAX           1024                  /* image URLs, not feed URLs: signed CDN links (Instagram) run 600-700 chars */
 #define NAME_MAX_LEN      96
+#define TEXT_MAX          256                   /* post text kept per image, UTF-8 bytes incl. NUL */
 #define PATH_MAX_LEN      (sizeof(FEEDS_DIR) + 10 + NAME_MAX_LEN + 8)
 #define MAX_REDIRECTS     5
 #define IO_CHUNK          4096
@@ -68,6 +70,7 @@ static photo_feed_status_t s_status;
 static char *s_feeds;
 static char (*s_urls)[URL_MAX];
 static char (*s_segs)[NAME_MAX_LEN];     /* last path segment of each URL (duplicate check) */
+static char (*s_texts)[TEXT_MAX];        /* post text of each item, same index as s_urls */
 static char (*s_keep)[NAME_MAX_LEN];
 static char (*s_doomed)[NAME_MAX_LEN];
 static char (*s_orphans)[NAME_MAX_LEN];
@@ -86,6 +89,7 @@ typedef struct {
     char part_path[PATH_MAX_LEN + NAME_MAX_LEN + 8];
     char backup_path[PATH_MAX_LEN + NAME_MAX_LEN + 8];
     char proxy_name[NAME_MAX_LEN];
+    char old_text[TEXT_MAX];
 } scratch_t;
 static scratch_t *s_scratch;
 
@@ -381,6 +385,192 @@ static bool is_http_url(const char *url)
     return strncmp(url, "https://", 8) == 0 || strncmp(url, "http://", 7) == 0;
 }
 
+/* Writes code point `cp` as UTF-8. @return bytes written (1-4). */
+static size_t utf8_put(char *out, uint32_t cp)
+{
+    if (cp < 0x80) {
+        out[0] = (char)cp;
+        return 1;
+    }
+    if (cp < 0x800) {
+        out[0] = (char)(0xC0 | (cp >> 6));
+        out[1] = (char)(0x80 | (cp & 0x3F));
+        return 2;
+    }
+    if (cp < 0x10000) {
+        out[0] = (char)(0xE0 | (cp >> 12));
+        out[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
+        out[2] = (char)(0x80 | (cp & 0x3F));
+        return 3;
+    }
+    out[0] = (char)(0xF0 | (cp >> 18));
+    out[1] = (char)(0x80 | ((cp >> 12) & 0x3F));
+    out[2] = (char)(0x80 | ((cp >> 6) & 0x3F));
+    out[3] = (char)(0x80 | (cp & 0x3F));
+    return 4;
+}
+
+/* In-place decode of named (&amp; &lt; &gt; &quot; &apos; &nbsp;) and numeric
+ * (&#233; &#xE9;) entities. The UTF-8 of a numeric entity is never longer than
+ * the entity itself, so the string only shrinks. */
+static void text_unescape(char *s)
+{
+    static const struct { const char *ent; char ch; } ents[] = {
+        {"&amp;", '&'}, {"&lt;", '<'}, {"&gt;", '>'}, {"&quot;", '"'}, {"&apos;", '\''}, {"&nbsp;", ' '},
+    };
+    char *w = s;
+    for (char *r = s; *r;) {
+        if (*r == '&' && r[1] == '#') {
+            bool hex = r[2] == 'x' || r[2] == 'X';
+            const char *digits = r + (hex ? 3 : 2);
+            char *end = NULL;
+            unsigned long cp = isxdigit((unsigned char)*digits) ? strtoul(digits, &end, hex ? 16 : 10) : 0;
+            if (cp > 0 && cp <= 0x10FFFF && *end == ';') {
+                w += utf8_put(w, (uint32_t)cp);
+                r = end + 1;
+                continue;
+            }
+        } else if (*r == '&') {
+            bool matched = false;
+            for (size_t ent_i = 0; ent_i < sizeof(ents) / sizeof(ents[0]) && !matched; ent_i++) {
+                size_t len = strlen(ents[ent_i].ent);
+                if (strncmp(r, ents[ent_i].ent, len) == 0) {
+                    *w++ = ents[ent_i].ch;
+                    r += len;
+                    matched = true;
+                }
+            }
+            if (matched) {
+                continue;
+            }
+        }
+        *w++ = *r++;
+    }
+    *w = '\0';
+}
+
+/* Reduces an element's content (in place in `s`) to one line of plain text in
+ * out: entity-decoded unless it was CDATA (feeds often carry escaped HTML),
+ * HTML tags dropped, entities decoded again, whitespace collapsed. Characters
+ * the display font doesn't have - emoji and other non-BMP characters, joiners,
+ * variation selectors - are left out. Cut at a character boundary to fit. */
+static void html_to_text(char *s, bool cdata, char *out, size_t out_len)
+{
+    if (!cdata) {
+        text_unescape(s);
+    }
+    char *w = s;
+    for (const char *r = s; *r;) {
+        if (*r == '<') {
+            const char *close = strchr(r, '>');
+            if (!close) {
+                break;
+            }
+            *w++ = ' ';
+            r = close + 1;
+        } else {
+            *w++ = *r++;
+        }
+    }
+    *w = '\0';
+    text_unescape(s);
+
+    size_t o = 0;
+    bool space = false;
+    for (const uint8_t *r = (const uint8_t *)s; *r;) {
+        size_t n = *r < 0x80 ? 1 : (*r & 0xE0) == 0xC0 ? 2 : (*r & 0xF0) == 0xE0 ? 3 : (*r & 0xF8) == 0xF0 ? 4 : 0;
+        uint32_t cp = n == 1 ? *r : n == 2 ? (*r & 0x1Fu) : n == 3 ? (*r & 0x0Fu) : (*r & 0x07u);
+        for (size_t byte_i = 1; byte_i < n; byte_i++) {
+            if ((r[byte_i] & 0xC0) != 0x80) {
+                n = 0; /* truncated sequence */
+                break;
+            }
+            cp = (cp << 6) | (r[byte_i] & 0x3Fu);
+        }
+        if (n == 0) {
+            r++; /* not UTF-8 - drop the byte */
+            continue;
+        }
+        const uint8_t *ch = r;
+        r += n;
+        if (cp <= 0x20 || cp == 0x7F || cp == 0xA0 || cp == 0x2028 || cp == 0x2029) {
+            space = o > 0;
+            continue;
+        }
+        if (cp >= 0x10000 || (cp >= 0x200B && cp <= 0x200D) || (cp >= 0xFE00 && cp <= 0xFE0F) || cp == 0xFEFF) {
+            continue;
+        }
+        if (o + (space ? 1 : 0) + n >= out_len) {
+            break;
+        }
+        if (space) {
+            out[o++] = ' ';
+            space = false;
+        }
+        memcpy(out + o, ch, n);
+        o += n;
+    }
+    out[o] = '\0';
+}
+
+/* Plain text (html_to_text) of the first <tag>...</tag> in [block, block_end).
+ * @return false if there is no such element or it has no text. */
+static bool element_text(const char *block, const char *block_end, const char *tag, char *out, size_t out_len)
+{
+    size_t tag_len = strlen(tag);
+    for (const char *p = block; (p = strstr(p, tag)) != NULL && p < block_end; p += tag_len) {
+        char next = p[tag_len];
+        if (next != '>' && !isspace((unsigned char)next)) {
+            continue; /* just a longer tag name sharing this prefix */
+        }
+        const char *open_end = strchr(p, '>');
+        if (!open_end || open_end >= block_end || open_end[-1] == '/') {
+            return false;
+        }
+        char close_tag[32];
+        snprintf(close_tag, sizeof(close_tag), "</%s>", tag + 1);
+        const char *content = open_end + 1;
+        const char *content_end = strstr(content, close_tag);
+        if (!content_end || content_end > block_end) {
+            return false;
+        }
+        while (content < content_end && isspace((unsigned char)*content)) {
+            content++;
+        }
+        bool cdata = strncmp(content, "<![CDATA[", 9) == 0;
+        if (cdata) {
+            content += 9;
+            const char *cdata_end = strstr(content, "]]>");
+            if (cdata_end && cdata_end < content_end) {
+                content_end = cdata_end;
+            }
+        }
+        size_t len = (size_t)(content_end - content);
+        char *buf = heap_caps_malloc(len + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!buf) {
+            return false;
+        }
+        memcpy(buf, content, len);
+        buf[len] = '\0';
+        html_to_text(buf, cdata, out, out_len);
+        free(buf);
+        return out[0] != '\0';
+    }
+    return false;
+}
+
+/* The post's text: its title, else its description/summary/content ("" if none). */
+static void item_text(const char *start, const char *end, char *out, size_t out_len)
+{
+    static const char *const tags[] = { "<title", "<description", "<summary", "<content:encoded", "<content" };
+    for (size_t tag_i = 0; tag_i < sizeof(tags) / sizeof(tags[0]); tag_i++) {
+        if (element_text(start, end, tags[tag_i], out, out_len)) {
+            return;
+        }
+    }
+    out[0] = '\0';
+}
+
 /* Picks one image URL out of an <item>/<entry> block (see photo_feed.h). */
 static bool item_image_url(const char *start, const char *end, char *url, size_t url_len)
 {
@@ -437,6 +627,7 @@ static size_t parse_feed(const char *doc, char (*urls)[URL_MAX], size_t max_urls
         if (is_other_media_name(s_segs[count])) {
             continue; /* GIF, WebP, video... */
         }
+        item_text(start, end, s_texts[count], TEXT_MAX);
         bool dup = false;
         for (size_t url_i = 0; url_i < count && !dup; url_i++) {
             dup = strcmp(urls[url_i], url) == 0;
@@ -693,6 +884,226 @@ static bool make_baseline(const char *url, const char *dir, const char *name)
 }
 
 /* ---------------------------------------------------------------------- */
+/* Post text in the image's EXIF                                           */
+/* ---------------------------------------------------------------------- */
+
+static uint16_t get16(const uint8_t *p, bool le)
+{
+    return le ? (uint16_t)(p[0] | p[1] << 8) : (uint16_t)(p[0] << 8 | p[1]);
+}
+
+static uint32_t get32(const uint8_t *p, bool le)
+{
+    return le ? p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24
+              : (uint32_t)p[0] << 24 | p[1] << 16 | p[2] << 8 | p[3];
+}
+
+static void put16(uint8_t *p, uint16_t v)
+{
+    p[0] = (uint8_t)(v >> 8);
+    p[1] = (uint8_t)v;
+}
+
+static void put32(uint8_t *p, uint32_t v)
+{
+    put16(p, (uint16_t)(v >> 16));
+    put16(p + 2, (uint16_t)v);
+}
+
+/* Orientation and ImageDescription from IFD0 of an "Exif\0\0" APP1 payload. */
+static void exif_read(const uint8_t *seg, size_t len, int *orient, char *desc, size_t desc_len)
+{
+    if (len < 14 || memcmp(seg, "Exif\0\0", 6) != 0) {
+        return;
+    }
+    const uint8_t *tiff = seg + 6;
+    uint32_t tlen = (uint32_t)(len - 6);
+    bool le = tiff[0] == 'I';
+    uint32_t ifd = get32(tiff + 4, le);
+    if (ifd > tlen - 2) {
+        return;
+    }
+    int n = get16(tiff + ifd, le);
+    for (int entry_i = 0; entry_i < n && ifd + 2 + (entry_i + 1) * 12 <= tlen; entry_i++) {
+        const uint8_t *entry = tiff + ifd + 2 + entry_i * 12;
+        uint16_t tag = get16(entry, le);
+        if (tag == 0x0112) {
+            *orient = get16(entry + 8, le);
+        } else if (tag == 0x010E && get16(entry + 2, le) == 2) {
+            uint32_t count = get32(entry + 4, le);
+            uint32_t off = count <= 4 ? (uint32_t)(entry + 8 - tiff) : get32(entry + 8, le);
+            if (count > 0 && off <= tlen && count <= tlen - off) {
+                size_t text_len = strnlen((const char *)tiff + off, count);
+                if (text_len < desc_len) {
+                    memcpy(desc, tiff + off, text_len);
+                    desc[text_len] = '\0';
+                }
+            }
+        }
+    }
+}
+
+/* Builds an APP1 segment (marker included) whose IFD0 holds just
+ * ImageDescription = text (UTF-8 - EXIF says ASCII, but readers take UTF-8)
+ * and Orientation. @return its size, 0 if there is nothing to store. */
+static size_t exif_build(uint8_t *out, int orient, const char *text)
+{
+    int n = (text[0] ? 1 : 0) + (orient != 1 ? 1 : 0);
+    if (n == 0) {
+        return 0;
+    }
+    uint8_t *tiff = out + 10; /* after FF E1, length, "Exif\0\0" */
+    memcpy(tiff, "MM\0\x2A", 4);
+    put32(tiff + 4, 8);
+    put16(tiff + 8, (uint16_t)n);
+    uint8_t *entry = tiff + 10;
+    uint32_t data = 10 + 12 * n + 4;
+    if (text[0]) { /* entries in tag order: 0x010E, then 0x0112 */
+        uint32_t count = (uint32_t)strlen(text) + 1;
+        put16(entry, 0x010E);
+        put16(entry + 2, 2);
+        put32(entry + 4, count);
+        if (count <= 4) {
+            memset(entry + 8, 0, 4);
+            memcpy(entry + 8, text, count);
+        } else {
+            put32(entry + 8, data);
+            memcpy(tiff + data, text, count);
+            data += count;
+        }
+        entry += 12;
+    }
+    if (orient != 1) {
+        put16(entry, 0x0112);
+        put16(entry + 2, 3);
+        put32(entry + 4, 1);
+        put16(entry + 8, (uint16_t)orient);
+        put16(entry + 10, 0);
+        entry += 12;
+    }
+    put32(entry, 0); /* no IFD1 */
+    size_t seg_len = 2 + 6 + data;
+    out[0] = 0xFF;
+    out[1] = 0xE1;
+    put16(out + 2, (uint16_t)seg_len);
+    memcpy(out + 4, "Exif\0\0", 6);
+    return 2 + seg_len;
+}
+
+/* Copies bytes [from, to) of src to dst; to < 0 means up to the end of src. */
+static bool copy_range(FILE *src, FILE *dst, long from, long to, uint8_t *buf, size_t buf_len)
+{
+    if (fseek(src, from, SEEK_SET) != 0) {
+        return false;
+    }
+    for (long left = to < 0 ? LONG_MAX : to - from; left > 0;) {
+        size_t n = fread(buf, 1, (size_t)left < buf_len ? (size_t)left : buf_len, src);
+        if (n == 0) {
+            return to < 0 && !ferror(src);
+        }
+        if (fwrite(buf, 1, n, dst) != n) {
+            return false;
+        }
+        left -= (long)n;
+    }
+    return true;
+}
+
+/* Stores `text` (the post's text) as the EXIF ImageDescription of JPEG
+ * "<dir>/<name>", where the photo frame shows it - unless it's already there.
+ * The file's own EXIF block is swapped for one holding just the text and the
+ * Orientation (camera details are dropped); it goes after a leading JFIF APP0.
+ * Written as "<stem>.part" and renamed into place, like a download - if the
+ * photo frame has the file open right now, the next sync tries again.
+ * @return true if the file was rewritten. */
+static bool jpeg_set_text(const char *dir, const char *name, const char *text)
+{
+    if (!has_extension(name, ".jpg") && !has_extension(name, ".jpeg")) {
+        return false;
+    }
+    char *path = s_scratch->path;
+    snprintf(path, sizeof(s_scratch->path), "%s/%s", dir, name);
+    FILE *src = fopen(path, "rb");
+    uint8_t *buf = malloc(IO_CHUNK);
+    if (!src || !buf) {
+        if (src) {
+            fclose(src);
+        }
+        free(buf);
+        return false;
+    }
+
+    /* Segments before the image data: where to insert, the existing EXIF
+     * block and the orientation / description it holds. */
+    char *old_text = s_scratch->old_text;
+    old_text[0] = '\0';
+    int orient = 1;
+    long insert_at = 2, exif_start = -1, exif_end = -1;
+    bool ok = fread(buf, 1, 2, src) == 2 && buf[0] == 0xFF && buf[1] == 0xD8;
+    for (int seg_i = 0; ok && seg_i < 64; seg_i++) {
+        long pos = ftell(src);
+        uint8_t hdr[4];
+        if (fread(hdr, 1, 4, src) != 4 || hdr[0] != 0xFF || hdr[1] == 0xDA || hdr[1] == 0xD9) {
+            break;
+        }
+        size_t len = (size_t)((hdr[2] << 8) | hdr[3]);
+        if (len < 2) {
+            ok = false;
+            break;
+        }
+        len -= 2;
+        long next = pos + 4 + (long)len;
+        if (seg_i == 0 && hdr[1] == 0xE0) {
+            insert_at = next;
+        }
+        if (hdr[1] == 0xE1 && exif_start < 0 && len >= 14) {
+            uint8_t *seg = heap_caps_malloc(len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+            if (seg && fread(seg, 1, len, src) == len && memcmp(seg, "Exif\0\0", 6) == 0) {
+                exif_read(seg, len, &orient, old_text, TEXT_MAX);
+                exif_start = pos;
+                exif_end = next;
+            }
+            free(seg);
+        }
+        if (fseek(src, next, SEEK_SET) != 0) {
+            ok = false;
+        }
+    }
+    if (!ok || strcmp(old_text, text) == 0) {
+        fclose(src);
+        free(buf);
+        return false;
+    }
+    if (exif_start < 0) {
+        exif_start = exif_end = insert_at;
+    }
+
+    char *part = s_scratch->part_path;
+    snprintf(part, sizeof(s_scratch->part_path), "%s/%.*s.part", dir, (int)(strrchr(name, '.') - name), name);
+    FILE *dst = fopen(part, "wb");
+    size_t exif_len = exif_build(buf, orient, text);
+    uint8_t *copy_buf = buf + exif_len;
+    size_t copy_len = IO_CHUNK - exif_len;
+    ok = dst && fwrite("\xFF\xD8", 1, 2, dst) == 2 && copy_range(src, dst, 2, insert_at, copy_buf, copy_len) &&
+         (exif_len == 0 || fwrite(buf, 1, exif_len, dst) == exif_len) &&
+         copy_range(src, dst, insert_at, exif_start, copy_buf, copy_len) &&
+         copy_range(src, dst, exif_end, -1, copy_buf, copy_len);
+    fclose(src);
+    if (dst && fclose(dst) != 0) {
+        ok = false;
+    }
+    free(buf);
+    /* FAT's rename() won't replace an existing file */
+    if (!ok || remove(path) != 0 || rename(part, path) != 0) {
+        remove(part);
+        ESP_LOGW(TAG, "Could not store the post text in %s", path);
+        return false;
+    }
+    ESP_LOGI(TAG, "%s: post text stored in EXIF", path);
+    return true;
+}
+
+/* ---------------------------------------------------------------------- */
 /* SD card bookkeeping                                                     */
 /* ---------------------------------------------------------------------- */
 
@@ -916,6 +1327,7 @@ static esp_err_t sync_feed(const char *feed_url, const char *dir, sync_counts_t 
         if (kept) {
             /* also retries ones kept from an earlier sync whose proxy fetch failed */
             io->changed |= make_baseline(orig_url, dir, found);
+            io->changed |= jpeg_set_text(dir, found, s_texts[url_i]);
             strlcpy(s_keep[keep_count++], found, NAME_MAX_LEN);
             count_kept(dir, found, io);
         } else {
@@ -1030,11 +1442,12 @@ esp_err_t photo_feed_init(void)
     s_feeds = heap_caps_malloc(SETTINGS_FEED_FEEDS_LEN, caps);
     s_urls = heap_caps_malloc(MAX_ITEMS * sizeof(*s_urls), caps);
     s_segs = heap_caps_malloc(MAX_ITEMS * sizeof(*s_segs), caps);
+    s_texts = heap_caps_malloc(MAX_ITEMS * sizeof(*s_texts), caps);
     s_keep = heap_caps_malloc(MAX_ITEMS * sizeof(*s_keep), caps);
     s_doomed = heap_caps_malloc(MAX_ITEMS * sizeof(*s_doomed), caps);
     s_orphans = heap_caps_malloc(MAX_ORPHAN_DIRS * sizeof(*s_orphans), caps);
     s_scratch = heap_caps_malloc(sizeof(*s_scratch), caps);
-    if (!s_lock || !s_feeds || !s_urls || !s_segs || !s_keep || !s_doomed || !s_orphans || !s_scratch) {
+    if (!s_lock || !s_feeds || !s_urls || !s_segs || !s_texts || !s_keep || !s_doomed || !s_orphans || !s_scratch) {
         return ESP_ERR_NO_MEM;
     }
     memset(&s_status, 0, sizeof(s_status));

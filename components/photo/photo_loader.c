@@ -185,7 +185,53 @@ typedef struct {
     const char *unsupported;   // NULL 이면 디코딩 가능
 } jpeg_probe_t;
 
-static int exif_orientation(const uint8_t *seg, int len)
+// 카메라가 ImageDescription 에 넣는 의미 없는 기본값 (사진 설명으로 보여 주지 않는다)
+static bool is_camera_placeholder(const char *s)
+{
+    static const char *const junk[] = { "OLYMPUS DIGITAL CAMERA", "SONY DSC", "DIGITAL CAMERA", "default",
+                                        "Default", "Exif_JPEG_PICTURE", "LEAD Technologies Inc. V1.01" };
+    for (size_t i = 0; i < sizeof(junk) / sizeof(junk[0]); i++) {
+        if (strcmp(s, junk[i]) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// IFD0 의 ImageDescription (ASCII 형식, 내용은 UTF-8) 을 앞뒤 공백을 빼고 caption 에 복사한다.
+// 사진 피드는 게시물 글을 여기에 넣는다. 잘라야 하면 UTF-8 글자 경계에서 자른다.
+static void exif_description(const uint8_t *tiff, uint32_t tlen, const uint8_t *entry, bool le,
+                             char *caption, size_t caption_len)
+{
+    uint32_t count = rd32(entry + 4, le);
+    uint32_t off = count <= 4 ? (uint32_t)(entry + 8 - tiff) : rd32(entry + 8, le);
+    if (rd16(entry + 2, le) != 2 || count == 0 || off > tlen || count > tlen - off) {
+        return;
+    }
+    const char *text = (const char *)tiff + off;
+    size_t n = strnlen(text, count);
+    while (n > 0 && isspace((unsigned char)*text)) {
+        text++;
+        n--;
+    }
+    while (n > 0 && isspace((unsigned char)text[n - 1])) {
+        n--;
+    }
+    if (n >= caption_len) {
+        n = caption_len - 1;
+        while (n > 0 && ((uint8_t)text[n] & 0xC0) == 0x80) {
+            n--;
+        }
+    }
+    memcpy(caption, text, n);
+    caption[n] = '\0';
+    if (is_camera_placeholder(caption)) {
+        caption[0] = '\0';
+    }
+}
+
+// EXIF(APP1) 의 IFD0 에서 방향을 반환하고, 설명이 있으면 caption 에 넣는다.
+static int exif_parse(const uint8_t *seg, int len, char *caption, size_t caption_len)
 {
     if (len < 14 || memcmp(seg, "Exif\0\0", 6) != 0) {
         return 1;
@@ -197,15 +243,19 @@ static int exif_orientation(const uint8_t *seg, int len)
     if (ifd + 2 > (uint32_t)tlen) {
         return 1;
     }
+    int orient = 1;
     int n = rd16(tiff + ifd, le);
     for (int i = 0; i < n && ifd + 2 + (i + 1) * 12 <= (uint32_t)tlen; i++) {
         const uint8_t *entry = tiff + ifd + 2 + i * 12;
-        if (rd16(entry, le) == 0x0112) {
+        uint16_t tag = rd16(entry, le);
+        if (tag == 0x0112) {
             int o = rd16(entry + 8, le);
-            return (o == 3 || o == 6 || o == 8) ? o : 1;
+            orient = (o == 3 || o == 6 || o == 8) ? o : 1;
+        } else if (tag == 0x010E) {
+            exif_description(tiff, (uint32_t)tlen, entry, le, caption, caption_len);
         }
     }
-    return 1;
+    return orient;
 }
 
 static const char *check_sof(uint8_t marker, const uint8_t *sof, int len)
@@ -233,7 +283,7 @@ static const char *check_sof(uint8_t marker, const uint8_t *sof, int len)
     return NULL;
 }
 
-static jpeg_probe_t jpeg_probe(FILE *f)
+static jpeg_probe_t jpeg_probe(FILE *f, char *caption, size_t caption_len)
 {
     jpeg_probe_t r = { .orient = 1, .unsupported = "no SOF marker" };
     uint8_t hdr[4];
@@ -260,7 +310,7 @@ static jpeg_probe_t jpeg_probe(FILE *f)
             break;
         }
         if (is_exif) {
-            r.orient = exif_orientation(seg, len);
+            r.orient = exif_parse(seg, len, caption, caption_len);
         } else {
             r.unsupported = check_sof(marker, seg, len);
             free(seg);
@@ -321,7 +371,7 @@ static UINT jpg_out(JDEC *jd, void *bitmap, JRECT *r)
 static esp_err_t decode_jpeg(FILE *f, const char *path, photo_frame_t *frame)
 {
     jpg_ctx_t c = { .f = f, .dst = frame->pixels };
-    jpeg_probe_t probe = jpeg_probe(f);
+    jpeg_probe_t probe = jpeg_probe(f, frame->caption, sizeof(frame->caption));
     if (probe.unsupported) {
         ESP_LOGW(TAG, "skip %s: %s", path, probe.unsupported);
         return ESP_ERR_NOT_SUPPORTED;
@@ -404,12 +454,12 @@ static esp_err_t decode_png(FILE *f, const char *path, photo_frame_t *frame)
     // 필요 메모리 ~= 압축 해제 원본(최대 4B/px) + draw buf 2개(8B/px), 파일은 이미 읽어 둠.
     size_t px = (size_t)w * h;
     size_t need = px * 4 + h + px * 8 + 64 * 1024;
+    // heap_caps_get_largest_free_block 은 쓰지 않는다: 힙 전체를 잠근 채(인터럽트 금지) 훑어서
+    // RGB LCD 의 bounce buffer 인터럽트가 밀려 화면이 깨진다. 큰 블록이 없으면 lodepng 가 실패로 끝난다.
     size_t free_now = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
-    size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM);
-    if (need > free_now || px * 4 + h > largest) {
-        ESP_LOGW(TAG, "skip %s: png %lux%lu needs ~%u KB, PSRAM free %u KB (largest %u KB)", path,
-                 (unsigned long)w, (unsigned long)h, (unsigned)(need / 1024),
-                 (unsigned)(free_now / 1024), (unsigned)(largest / 1024));
+    if (need > free_now) {
+        ESP_LOGW(TAG, "skip %s: png %lux%lu needs ~%u KB, PSRAM free %u KB", path,
+                 (unsigned long)w, (unsigned long)h, (unsigned)(need / 1024), (unsigned)(free_now / 1024));
         free(in);
         return ESP_ERR_NO_MEM;
     }
@@ -451,6 +501,7 @@ static esp_err_t decode_file(const char *path, photo_frame_t *frame)
 {
     FILE *f = fopen(path, "rb");
     ESP_RETURN_ON_FALSE(f, ESP_ERR_NOT_FOUND, TAG, "open %s", path);
+    frame->caption[0] = '\0';
     setvbuf(f, NULL, _IOFBF, FILE_BUF_SIZE);
 
     int64_t t0 = esp_timer_get_time();

@@ -28,8 +28,14 @@ static esp_err_t grow(char **buf, size_t *cap, size_t need)
     while (new_cap < need) {
         new_cap *= 2;
     }
-    char *p = heap_caps_realloc(*buf, new_cap, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    // heap_caps_realloc 은 옮길 때 복사를 힙 잠금(인터럽트 금지) 안에서 한다. 수백 KB 를 그렇게
+    // 복사하면 RGB LCD 의 bounce buffer 인터럽트가 밀려 화면이 깨지므로, 새로 잡고 밖에서 복사한다.
+    char *p = heap_caps_malloc(new_cap, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     ESP_RETURN_ON_FALSE(p, ESP_ERR_NO_MEM, TAG, "no memory for %u bytes", (unsigned)new_cap);
+    if (*buf) {
+        memcpy(p, *buf, *cap);
+        free(*buf);
+    }
     *buf = p;
     *cap = new_cap;
     return ESP_OK;
